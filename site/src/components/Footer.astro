@@ -1,5 +1,11 @@
 ---
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+const rawLinks = [
+  { label: 'LLMs.txt', href: `${base}/llms.txt` },
+  { label: 'INSTALL.md', href: `${base}/INSTALL.md` },
+  { label: 'SKILL.md', href: `${base}/SKILL.md` },
+];
 ---
 
 <footer class="border-t border-border">
@@ -7,6 +13,14 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
     class="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-10 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6"
   >
     <span>Apache License 2.0.</span>
-    <a href={`${base}/llms.txt`} class="transition hover:text-foreground">llms.txt</a>
+    <div class="flex flex-wrap items-center gap-4">
+      {
+        rawLinks.map((link) => (
+          <a href={link.href} class="transition hover:text-foreground">
+            {link.label}
+          </a>
+        ))
+      }
+    </div>
   </div>
 </footer>
