@@ -489,39 +489,34 @@ export default function InteractiveTerminal() {
   }, [phase]);
 
   return (
-    <div className={`overflow-hidden rounded-lg border ${BORDER} ${BODY_BG} shadow-sm`}>
-      {/* titlebar */}
-      <div className={`flex items-center justify-between border-b ${BORDER} ${TITLEBAR_BG} px-4 py-2 text-xs ${TEXT_MUTED}`}>
-        <div className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-[color:var(--code-hairline)]" />
-          <span className="h-2.5 w-2.5 rounded-full bg-[color:var(--code-hairline)]" />
-          <span className="h-2.5 w-2.5 rounded-full bg-[color:var(--code-hairline)]" />
-        </div>
-        <div className="font-mono">mcp2cli — live demo</div>
-        <button
-          type="button"
-          onClick={restart}
-          aria-label="Restart demo"
-          title="Restart"
-          className={`flex h-5 w-5 items-center justify-center rounded ${TEXT_MUTED} transition hover:${TEXT_FG} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--code-fg-muted)]`}
+    <div className={`relative overflow-hidden rounded-lg border ${BORDER} ${BODY_BG}`}>
+      {/* Floating restart button — mirrors the position of the copy
+          button on the sibling code blocks, so the interactive
+          terminal reads as the same kind of surface with a different
+          affordance. */}
+      <button
+        type="button"
+        onClick={restart}
+        aria-label="Restart demo"
+        title="Restart"
+        className={`absolute right-[0.35rem] top-[0.35rem] z-10 flex h-7 w-7 items-center justify-center rounded ${TEXT_MUTED} transition hover:bg-[color:var(--code-chrome)] hover:${TEXT_FG} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--code-fg-muted)]`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-3.5 w-3.5"
+          aria-hidden="true"
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-3.5 w-3.5"
-            aria-hidden="true"
-          >
-            <path d="M3 12a9 9 0 0 1 15.5-6.5L21 8"></path>
-            <path d="M21 3v5h-5"></path>
-            <path d="M21 12a9 9 0 0 1-15.5 6.5L3 16"></path>
-            <path d="M3 21v-5h5"></path>
-          </svg>
-        </button>
-      </div>
+          <path d="M3 12a9 9 0 0 1 15.5-6.5L21 8"></path>
+          <path d="M21 3v5h-5"></path>
+          <path d="M21 12a9 9 0 0 1-15.5 6.5L3 16"></path>
+          <path d="M3 21v-5h5"></path>
+        </svg>
+      </button>
 
       {/* body */}
       <div

@@ -86,12 +86,22 @@
   }
 }
 
-/* Shiki dual-theme support */
-html.dark .astro-code,
-html.dark .astro-code span {
-  color: var(--shiki-dark) !important;
-  background-color: var(--shiki-dark-bg) !important;
-  font-style: var(--shiki-dark-font-style) !important;
-  font-weight: var(--shiki-dark-font-weight) !important;
-  text-decoration: var(--shiki-dark-text-decoration) !important;
+/* Strip expressive-code's decorative terminal titlebar so every
+   fenced code block renders as a plain bordered box — same
+   silhouette as the interactive terminal on the landing, just
+   smaller and without the restart button. The copy button stays
+   (it's a sibling of the figcaption, not a child). */
+.expressive-code .frame > figcaption.header {
+  display: none !important;
+}
+.expressive-code .frame > pre {
+  border-top-left-radius: var(--ec-brdRad) !important;
+  border-top-right-radius: var(--ec-brdRad) !important;
+  border-top: 1px solid var(--code-hairline) !important;
+}
+/* The copy button sits a bit further from the top-right corner
+   now that there's no titlebar to align with. */
+.expressive-code .frame .copy {
+  top: 0.35rem !important;
+  right: 0.35rem !important;
 }
