@@ -62,6 +62,14 @@
   }
 }
 
+@layer utilities {
+  @keyframes terminal-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+}
+
 @layer components {
   .grid-bg {
     background-image:

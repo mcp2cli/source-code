@@ -1,34 +1,11 @@
 ---
-import { Code } from 'astro-expressive-code/components';
-
-// Landing-page demo rendered through <Code> so it inherits the exact
-// framing, padding, typography, copy button, and theme tokens of every
-// docs code block. Uses `lang="bash"` (not `shellsession`) so that
-// Shiki's full bash grammar sub-highlights commands, flags, and
-// strings — shellsession treats each line as one opaque prompt run
-// and leaves the command body uncoloured. Output lines are rendered
-// as `#` comments so they read as muted annotations.
-
-const session = `# install mcp2cli
-cargo install --path .
-
-# register an MCP server as a named config
-mcp2cli config init --name work \\
-    --transport streamable_http \\
-    --endpoint http://127.0.0.1:3001/mcp
-
-# install a symlink alias so \`work\` routes here
-mcp2cli link create --name work
-
-# discover capabilities
-work ls
-# → tools:     echo  search  email.send  email.reply
-# → resources: file:///{path}  demo://readme
-# → prompts:   summarise  review-diff
-
-# call a tool — typed --flags come from the server's JSON Schema
-work email send --to user@example.com --body "Meeting at 3"
-# → ✓ queued (delivery_id: a4f2…)`;
+// Landing-page interactive terminal. The heavy-lift lives in
+// InteractiveTerminal.tsx (a React island hydrated on load) — it
+// autoplays an install script, then presents a wizard the reader can
+// navigate with ↑↓/Tab/Enter or click. Picks land as scrollback and
+// the wizard re-appears so the component feels like a real shell.
+// Pattern adapted from https://github.com/tempoxyz/mpp (Apache-2.0).
+import InteractiveTerminal from './InteractiveTerminal';
 ---
 
-<Code code={session} lang="bash" />
+<InteractiveTerminal client:load />
