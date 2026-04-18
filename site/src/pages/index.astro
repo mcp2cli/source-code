@@ -74,6 +74,21 @@ const cargoCmd = `cargo install --git https://github.com/mcp2cli/source-code`;
 
   <section class="border-b border-border">
     <div class="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+      <div class="mb-8 flex items-end justify-between gap-4">
+        <div>
+          <div class="mb-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            Demo
+          </div>
+          <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">
+            Any MCP server, one binary away.
+          </h2>
+        </div>
+        <a
+          href={href('/docs/getting-started')}
+          class="hidden whitespace-nowrap text-sm text-muted-foreground underline decoration-muted-foreground underline-offset-4 transition hover:text-foreground hover:decoration-foreground sm:inline-block"
+          >Full walk-through →</a
+        >
+      </div>
       <Terminal />
     </div>
   </section>
