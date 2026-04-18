@@ -5,6 +5,7 @@ import sitemap from '@astrojs/sitemap';
 import tailwind from '@astrojs/tailwind';
 import expressiveCode from 'astro-expressive-code';
 import { remarkMermaid } from './src/lib/remark-mermaid';
+import { rehypeStripFirstH1 } from './src/lib/rehype-strip-first-h1';
 
 // https://astro.build/config
 export default defineConfig({
@@ -25,6 +26,7 @@ export default defineConfig({
   ],
   markdown: {
     remarkPlugins: [remarkMermaid],
+    rehypePlugins: [rehypeStripFirstH1],
   },
   vite: {
     server: {
