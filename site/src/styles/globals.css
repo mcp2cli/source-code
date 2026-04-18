@@ -108,6 +108,14 @@
   }
 }
 
+/* Give every expressive-code block a consistent vertical gap so
+   stacked fences (common in docs and the landing install section)
+   don't visually fuse into one surface. Margins collapse between
+   adjacent blocks to a single 1rem gap. */
+.expressive-code {
+  margin-block: 1rem;
+}
+
 /* Strip expressive-code's decorative terminal titlebar so every
    fenced code block renders as a plain bordered box — same
    silhouette as the interactive terminal on the landing, just
