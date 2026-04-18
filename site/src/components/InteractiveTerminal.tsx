@@ -327,7 +327,10 @@ function Wizard({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (autoFocus) containerRef.current?.focus();
+    // `preventScroll: true` so focusing the wizard for keyboard nav
+    // doesn't yank the page when the menu appears a few seconds into
+    // the autoplay. Keyboard users can still Tab into it.
+    if (autoFocus) containerRef.current?.focus({ preventScroll: true });
   }, [autoFocus]);
 
   const handleKey = useCallback(
