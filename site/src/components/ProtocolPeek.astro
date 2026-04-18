@@ -2,23 +2,104 @@
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const href = (p: string) => `${base}${p}`;
 
-type Row = { category: string; method: string };
+type Direction = 'client→server' | 'server→client' | 'bidirectional';
 
-const rows: Row[] = [
-  { category: 'Lifecycle', method: 'initialize · initialized · ping' },
-  { category: 'Discovery', method: 'tools/list · resources/list · prompts/list · */list_changed' },
-  { category: 'Tools', method: 'tools/call + _meta.progressToken + _meta.task' },
-  { category: 'Resources', method: 'resources/read · subscribe · unsubscribe · updated' },
-  { category: 'Prompts', method: 'prompts/get' },
-  { category: 'Completions', method: 'completion/complete · ref.context' },
-  { category: 'Logging', method: 'logging/setLevel · notifications/message' },
-  { category: 'Progress', method: 'notifications/progress' },
-  { category: 'Cancellation', method: 'notifications/cancelled (bidirectional)' },
-  { category: 'Elicitation', method: 'elicitation/create  (server → client)' },
-  { category: 'Sampling', method: 'sampling/createMessage  (server → client)' },
-  { category: 'Roots', method: 'roots/list  (server → client)' },
-  { category: 'Tasks', method: 'tasks/get · tasks/result · tasks/cancel' },
+type Category = {
+  title: string;
+  direction: Direction;
+  methods: string[];
+  doc?: string; // slug under /docs/, without leading slash
+};
+
+const categories: Category[] = [
+  {
+    title: 'Lifecycle',
+    direction: 'client→server',
+    methods: ['initialize', 'notifications/initialized', 'ping'],
+    doc: 'protocol-coverage#lifecycle',
+  },
+  {
+    title: 'Discovery',
+    direction: 'client→server',
+    methods: ['tools/list', 'resources/list', 'resources/templates/list', 'prompts/list', '*/list_changed'],
+    doc: 'protocol-coverage#discovery',
+  },
+  {
+    title: 'Tools',
+    direction: 'client→server',
+    methods: ['tools/call', '_meta.progressToken', '_meta.task'],
+    doc: 'protocol-coverage#tool-invocation',
+  },
+  {
+    title: 'Resources',
+    direction: 'bidirectional',
+    methods: ['resources/read', 'subscribe', 'unsubscribe', 'resources/updated'],
+    doc: 'protocol-coverage#resources',
+  },
+  {
+    title: 'Prompts',
+    direction: 'client→server',
+    methods: ['prompts/get'],
+    doc: 'protocol-coverage#prompts',
+  },
+  {
+    title: 'Completions',
+    direction: 'client→server',
+    methods: ['completion/complete', 'ref.context'],
+    doc: 'protocol-coverage#completions',
+  },
+  {
+    title: 'Logging',
+    direction: 'bidirectional',
+    methods: ['logging/setLevel', 'notifications/message'],
+    doc: 'protocol-coverage#logging',
+  },
+  {
+    title: 'Progress',
+    direction: 'server→client',
+    methods: ['notifications/progress'],
+    doc: 'protocol-coverage#progress',
+  },
+  {
+    title: 'Cancellation',
+    direction: 'bidirectional',
+    methods: ['notifications/cancelled'],
+    doc: 'protocol-coverage#cancellation',
+  },
+  {
+    title: 'Elicitation',
+    direction: 'server→client',
+    methods: ['elicitation/create'],
+    doc: 'protocol-coverage#elicitation',
+  },
+  {
+    title: 'Sampling',
+    direction: 'server→client',
+    methods: ['sampling/createMessage'],
+    doc: 'protocol-coverage#sampling',
+  },
+  {
+    title: 'Roots',
+    direction: 'server→client',
+    methods: ['roots/list'],
+    doc: 'protocol-coverage#roots',
+  },
+  {
+    title: 'Tasks',
+    direction: 'client→server',
+    methods: ['tasks/get', 'tasks/result', 'tasks/cancel'],
+    doc: 'protocol-coverage#tasks-long-running-operations',
+  },
 ];
+
+const arrow = (d: Direction) =>
+  d === 'client→server' ? '→' : d === 'server→client' ? '←' : '↔';
+const directionLabel = (d: Direction) =>
+  d === 'client→server'
+    ? 'client → server'
+    : d === 'server→client'
+      ? 'server → client'
+      : 'bidirectional';
 ---
 
 <section id="protocol" class="mx-auto max-w-6xl scroll-mt-16 px-4 py-16 sm:px-6">
@@ -31,8 +112,9 @@ const rows: Row[] = [
         Full MCP 2025-11-25 coverage.
       </h2>
       <p class="mt-2 max-w-2xl text-muted-foreground">
-        From lifecycle and discovery through bidirectional notifications and
-        long-running tasks — all mapped to CLI verbs.
+        {categories.length} capability groups — from lifecycle and discovery
+        through bidirectional notifications and long-running tasks — each
+        mapped to CLI verbs you can invoke today.
       </p>
     </div>
     <a
@@ -42,20 +124,57 @@ const rows: Row[] = [
     >
   </div>
 
-  <div class="overflow-hidden rounded-lg border border-border">
-    <table class="w-full text-sm">
-      <tbody>
-        {
-          rows.map((row, i) => (
-            <tr class:list={['border-border', i !== 0 && 'border-t']}>
-              <td class="w-1/3 px-4 py-2.5 font-medium">{row.category}</td>
-              <td class="px-4 py-2.5 font-mono text-[13px] text-muted-foreground">
-                {row.method}
-              </td>
-            </tr>
-          ))
-        }
-      </tbody>
-    </table>
+  {/* Legend */}
+  <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+    <span class="inline-flex items-center gap-1.5">
+      <span class="font-mono text-foreground">→</span>
+      client&nbsp;→&nbsp;server
+    </span>
+    <span class="inline-flex items-center gap-1.5">
+      <span class="font-mono text-foreground">←</span>
+      server&nbsp;→&nbsp;client
+    </span>
+    <span class="inline-flex items-center gap-1.5">
+      <span class="font-mono text-foreground">↔</span>
+      bidirectional
+    </span>
+  </div>
+
+  <div
+    class="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-3"
+  >
+    {
+      categories.map((cat) => {
+        const href_ = cat.doc ? `${base}/docs/${cat.doc}` : undefined;
+        const Inner = (
+          <div class="flex h-full flex-col gap-3 bg-background p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-sm font-semibold tracking-tight">{cat.title}</h3>
+              <span
+                class="font-mono text-[11px] text-muted-foreground"
+                title={directionLabel(cat.direction)}
+                aria-label={directionLabel(cat.direction)}
+              >
+                {arrow(cat.direction)}
+              </span>
+            </div>
+            <ul class="flex flex-wrap gap-1.5">
+              {cat.methods.map((m) => (
+                <li class="rounded border border-border bg-subtle px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+                  {m}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+        return href_ ? (
+          <a href={href_} class="group transition hover:bg-muted">
+            {Inner}
+          </a>
+        ) : (
+          Inner
+        );
+      })
+    }
   </div>
 </section>
