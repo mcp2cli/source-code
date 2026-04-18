@@ -1,0 +1,56 @@
+---
+import ThemeToggle from './ThemeToggle.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const href = (path: string) => `${base}${path}`;
+const current = Astro.url.pathname.replace(new RegExp(`^${base}`), '');
+const isActive = (path: string) =>
+  path === '/' ? current === '/' || current === '' : current.startsWith(path);
+---
+
+<header class="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur">
+  <div class="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
+    <a
+      href={href('/')}
+      class="flex items-center gap-2 text-sm font-semibold tracking-tight"
+    >
+      <span class="font-mono text-foreground">{'>'}</span>
+      <span>mcp2cli</span>
+    </a>
+
+    <nav class="hidden items-center gap-5 text-sm sm:flex">
+      <a
+        href={href('/docs')}
+        class:list={[
+          'text-muted-foreground transition hover:text-foreground',
+          isActive('/docs') && 'text-foreground',
+        ]}
+      >
+        Docs
+      </a>
+      <a
+        href={href('/docs/protocol-coverage')}
+        class="text-muted-foreground transition hover:text-foreground"
+      >
+        Protocol
+      </a>
+      <a
+        href={href('/docs/features/discovery-driven-cli')}
+        class="text-muted-foreground transition hover:text-foreground"
+      >
+        Features
+      </a>
+    </nav>
+
+    <div class="ml-auto flex items-center gap-1">
+      <a
+        href="https://github.com/mcp2cli/source-code"
+        class="hidden rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground sm:inline-flex"
+        aria-label="GitHub repository"
+      >
+        GitHub
+      </a>
+      <ThemeToggle />
+    </div>
+  </div>
+</header>

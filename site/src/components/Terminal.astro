@@ -1,0 +1,64 @@
+---
+// A static terminal block — no animation, no JS. Renders an install +
+// typical-usage flow with muted-tone prompts and output lines.
+
+type Line =
+  | { kind: 'prompt'; text: string; comment?: string }
+  | { kind: 'output'; text: string }
+  | { kind: 'blank' };
+
+const lines: Line[] = [
+  { kind: 'prompt', text: 'cargo install --path .', comment: '# install' },
+  { kind: 'output', text: '   Installed mcp2cli v0.1.0' },
+  { kind: 'blank' },
+  {
+    kind: 'prompt',
+    text: 'mcp2cli config init --name work \\\n             --transport streamable_http \\\n             --endpoint http://127.0.0.1:3001/mcp',
+  },
+  { kind: 'output', text: 'Config "work" created.' },
+  { kind: 'blank' },
+  { kind: 'prompt', text: 'mcp2cli link create --name work' },
+  { kind: 'output', text: 'Linked: ~/.local/bin/work → mcp2cli' },
+  { kind: 'blank' },
+  { kind: 'prompt', text: 'work ls', comment: '# discover capabilities' },
+  { kind: 'output', text: 'tools:     echo  search  email.send  email.reply' },
+  { kind: 'output', text: 'resources: file:///{path}  demo://readme' },
+  { kind: 'output', text: 'prompts:   summarise  review-diff' },
+  { kind: 'blank' },
+  {
+    kind: 'prompt',
+    text: 'work email send --to user@example.com --body "Meeting at 3"',
+  },
+  { kind: 'output', text: '✓ queued (delivery_id: a4f2…)' },
+];
+---
+
+<div class="overflow-hidden rounded-lg border border-border bg-subtle shadow-sm">
+  <div
+    class="flex items-center justify-between border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground"
+  >
+    <div class="flex items-center gap-1.5">
+      <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
+      <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
+      <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
+    </div>
+    <div class="font-mono">~/projects/work</div>
+    <div class="w-12"></div>
+  </div>
+
+  <pre class="overflow-x-auto px-4 py-4 font-mono text-[13px] leading-6"><code>{
+      lines.map((line) => {
+        if (line.kind === 'blank') return '\n';
+        if (line.kind === 'output') {
+          return (<span class="block text-muted-foreground">{line.text}</span>);
+        }
+        return (
+          <span class="block">
+            <span class="text-muted-foreground">$ </span>
+            <span class="text-foreground">{line.text}</span>
+            {line.comment ? <span class="text-muted-foreground">{'  ' + line.comment}</span> : null}
+          </span>
+        );
+      })
+    }</code></pre>
+</div>

@@ -1,0 +1,140 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import { buildNav, isActive } from '@/lib/nav';
+
+type Heading = { depth: number; slug: string; text: string };
+
+type Props = {
+  title: string;
+  description?: string;
+  currentSlug: string;
+  headings?: Heading[];
+  editUrl?: string;
+};
+
+const { title, description, currentSlug, headings = [], editUrl } = Astro.props;
+
+const sections = await buildNav();
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const docHref = (slug: string) => (slug === '' ? `${base}/docs` : `${base}/docs/${slug}`);
+
+// Find prev/next for footer navigation.
+const flat = sections.flatMap((s) => s.items);
+const idx = flat.findIndex((item) => item.slug === currentSlug);
+const prev = idx > 0 ? flat[idx - 1] : null;
+const next = idx >= 0 && idx < flat.length - 1 ? flat[idx + 1] : null;
+
+const tocHeadings = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+
+<BaseLayout title={`${title} · mcp2cli`} description={description}>
+  <div class="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)_200px] lg:gap-10 lg:py-12">
+    <aside class="hidden lg:block">
+      <nav class="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto pr-2 text-sm">
+        {
+          sections.map((section) => (
+            <div class="mb-6">
+              <div class="mb-2 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                {section.title}
+              </div>
+              <ul class="space-y-1">
+                {section.items.map((item) => (
+                  <li>
+                    <a
+                      href={docHref(item.slug)}
+                      class:list={[
+                        'block rounded-md px-2 py-1 transition',
+                        isActive(currentSlug, item.slug)
+                          ? 'bg-muted text-foreground font-medium'
+                          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                      ]}
+                    >
+                      {item.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </nav>
+    </aside>
+
+    <article class="min-w-0">
+      <header class="mb-8 border-b border-border pb-6">
+        <h1 class="text-3xl font-semibold tracking-tight">{title}</h1>
+        {description && <p class="mt-2 text-muted-foreground">{description}</p>}
+      </header>
+
+      <div class="prose prose-neutral dark:prose-invert">
+        <slot />
+      </div>
+
+      <div class="mt-12 flex items-center justify-between gap-4 border-t border-border pt-6 text-sm">
+        <div class="flex-1 text-left">
+          {
+            prev && (
+              <a
+                href={docHref(prev.slug)}
+                class="inline-flex flex-col text-muted-foreground transition hover:text-foreground"
+              >
+                <span class="text-xs uppercase tracking-wide">← Previous</span>
+                <span class="mt-0.5 font-medium text-foreground">{prev.label}</span>
+              </a>
+            )
+          }
+        </div>
+        <div class="flex-1 text-right">
+          {
+            next && (
+              <a
+                href={docHref(next.slug)}
+                class="inline-flex flex-col text-muted-foreground transition hover:text-foreground"
+              >
+                <span class="text-xs uppercase tracking-wide">Next →</span>
+                <span class="mt-0.5 font-medium text-foreground">{next.label}</span>
+              </a>
+            )
+          }
+        </div>
+      </div>
+
+      {
+        editUrl && (
+          <div class="mt-8 text-xs text-muted-foreground">
+            <a
+              href={editUrl}
+              class="underline decoration-muted-foreground underline-offset-4 transition hover:text-foreground hover:decoration-foreground"
+            >
+              Edit this page on GitHub
+            </a>
+          </div>
+        )
+      }
+    </article>
+
+    <aside class="hidden xl:block">
+      {
+        tocHeadings.length > 0 && (
+          <nav class="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto text-sm">
+            <div class="mb-2 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              On this page
+            </div>
+            <ul class="space-y-1.5">
+              {tocHeadings.map((h) => (
+                <li class={h.depth === 3 ? 'pl-3' : ''}>
+                  <a
+                    href={`#${h.slug}`}
+                    class="text-muted-foreground transition hover:text-foreground"
+                  >
+                    {h.text}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )
+      }
+    </aside>
+  </div>
+</BaseLayout>

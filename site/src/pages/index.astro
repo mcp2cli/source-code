@@ -1,0 +1,113 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import Terminal from '@/components/Terminal.astro';
+import FeatureGrid from '@/components/FeatureGrid.astro';
+import ProtocolPeek from '@/components/ProtocolPeek.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const href = (p: string) => `${base}${p}`;
+---
+
+<BaseLayout>
+  <section class="relative overflow-hidden border-b border-border">
+    <div class="absolute inset-0 -z-10 grid-bg"></div>
+    <div class="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
+      <div class="max-w-3xl">
+        <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-subtle px-3 py-1 text-xs text-muted-foreground">
+          <span class="font-mono text-foreground">$</span>
+          <span>mcp2cli 0.1.0 — MCP 2025-11-25</span>
+        </div>
+        <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl md:text-6xl">
+          Turn any MCP server into a native command-line application.
+        </h1>
+        <p class="mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground">
+          mcp2cli discovers an MCP server's tools, resources, and prompts, and
+          renders them as a typed CLI — required fields become required flags,
+          JSON Schema drives argument parsing, dotted names become subcommands.
+          One binary. Any server. Real CLI commands.
+        </p>
+        <div class="mt-8 flex flex-wrap items-center gap-3">
+          <a
+            href={href('/docs/getting-started')}
+            class="inline-flex h-10 items-center gap-2 rounded-md border border-foreground bg-foreground px-5 text-sm font-medium text-background transition hover:bg-foreground/90"
+          >
+            Get started <span class="font-mono">→</span>
+          </a>
+          <a
+            href={href('/docs/protocol-coverage')}
+            class="inline-flex h-10 items-center rounded-md border border-border bg-background px-5 text-sm font-medium transition hover:bg-muted"
+          >
+            Protocol coverage
+          </a>
+          <a
+            href="https://github.com/mcp2cli/source-code"
+            class="inline-flex h-10 items-center rounded-md px-3 text-sm text-muted-foreground transition hover:text-foreground"
+          >
+            GitHub
+          </a>
+        </div>
+      </div>
+
+      <div class="mt-14 sm:mt-20">
+        <Terminal />
+      </div>
+    </div>
+  </section>
+
+  <section class="border-b border-border bg-subtle/40">
+    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:grid-cols-2 sm:px-6 lg:grid-cols-3">
+      <div>
+        <div class="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          Protocol-first
+        </div>
+        <p class="text-sm leading-relaxed">
+          Full <a
+            href={href('/docs/protocol-coverage')}
+            class="underline decoration-muted-foreground underline-offset-4 transition hover:decoration-foreground"
+            >MCP 2025-11-25</a
+          > — discovery, tools, resources, prompts, completions, elicitation,
+          sampling, roots, notifications, and tasks. All mapped to CLI verbs.
+        </p>
+      </div>
+      <div>
+        <div class="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          No code required
+        </div>
+        <p class="text-sm leading-relaxed">
+          Point mcp2cli at an MCP endpoint and start invoking tools. No custom
+          client code, no JSON-RPC plumbing, no session boilerplate.
+        </p>
+      </div>
+      <div class="sm:col-span-2 lg:col-span-1">
+        <div class="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          Shell-native
+        </div>
+        <p class="text-sm leading-relaxed">
+          Exit codes, JSON / NDJSON output, background jobs, Ctrl+C
+          cancellation, Unix-socket event streams. Built to pipe.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <FeatureGrid />
+  <ProtocolPeek />
+
+  <section class="border-t border-border">
+    <div class="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+      <div class="flex flex-col items-start gap-4">
+        <div class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          Install
+        </div>
+        <pre class="w-full overflow-x-auto rounded-md border border-border bg-subtle p-4 font-mono text-sm"><code>{`git clone https://github.com/mcp2cli/source-code.git
+cd source-code
+cargo install --path .`}</code></pre>
+        <a
+          href={href('/docs/files/INSTALL')}
+          class="text-sm text-muted-foreground underline decoration-muted-foreground underline-offset-4 transition hover:text-foreground hover:decoration-foreground"
+          >Full install guide →</a
+        >
+      </div>
+    </div>
+  </section>
+</BaseLayout>

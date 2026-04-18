@@ -1,0 +1,45 @@
+---
+import { getCollection, render, type CollectionEntry } from 'astro:content';
+import DocsLayout from '@/layouts/DocsLayout.astro';
+
+export async function getStaticPaths() {
+  const entries = (await getCollection('docs')) as CollectionEntry<'docs'>[];
+  return entries.map((entry) => ({
+    // `docs/index.md` → slug `undefined`  → `/docs`
+    // `docs/features/x.md` → slug `'features/x'` → `/docs/features/x`
+    params: { slug: entry.id === 'index' ? undefined : entry.id },
+    props: { entry },
+  }));
+}
+
+type Props = { entry: CollectionEntry<'docs'> };
+const { entry } = Astro.props as Props;
+const { Content, headings } = await render(entry);
+
+// Derive a title from frontmatter, the first H1 in headings, or a
+// humanised slug. This keeps docs pages titled even when the source
+// markdown has no frontmatter.
+const frontmatterTitle = (entry.data as { title?: string }).title;
+const firstH1 = headings.find((h) => h.depth === 1)?.text;
+const fallback = (entry.id === 'index' ? 'Documentation' : entry.id)
+  .split('/')
+  .pop()!
+  .split('-')
+  .map((s) => (s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1)))
+  .join(' ');
+const title = frontmatterTitle ?? firstH1 ?? fallback;
+
+const description = (entry.data as { description?: string }).description;
+const editUrl = `https://github.com/mcp2cli/source-code/edit/main/docs/${entry.id}.md`;
+const currentSlug = entry.id === 'index' ? '' : entry.id;
+---
+
+<DocsLayout
+  title={title}
+  description={description}
+  currentSlug={currentSlug}
+  headings={headings}
+  editUrl={editUrl}
+>
+  <Content />
+</DocsLayout>

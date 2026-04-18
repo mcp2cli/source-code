@@ -1,0 +1,80 @@
+---
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const href = (p: string) => `${base}${p}`;
+
+type Feature = {
+  title: string;
+  body: string;
+  to: string;
+};
+
+const features: Feature[] = [
+  {
+    title: 'Discovery-driven CLI',
+    body: 'Server capabilities auto-generate typed clap commands with flags derived from JSON Schema.',
+    to: '/docs/features/discovery-driven-cli',
+  },
+  {
+    title: 'Named configs & aliases',
+    body: 'Bind each server to a name; install symlinks so work, staging, prod feel like standalone apps.',
+    to: '/docs/features/named-configs-and-aliases',
+  },
+  {
+    title: 'Multiple transports',
+    body: 'Streamable HTTP and stdio out of the box. Ad-hoc --url / --stdio for zero-config runs.',
+    to: '/docs/features/transports',
+  },
+  {
+    title: 'Daemon mode',
+    body: 'Keep MCP connections warm between invocations. No init cost on every command.',
+    to: '/docs/features/daemon-mode',
+  },
+  {
+    title: 'Background jobs',
+    body: '--background hands long-running ops to server-side tasks; jobs show / wait / cancel / watch.',
+    to: '/docs/features/background-jobs',
+  },
+  {
+    title: 'Elicitation & sampling',
+    body: 'Interactive terminal prompts for server→client input; human-in-the-loop for LLM sampling.',
+    to: '/docs/features/elicitation-and-sampling',
+  },
+];
+---
+
+<section class="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+  <div class="mb-8 flex items-end justify-between gap-4">
+    <div>
+      <div class="mb-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+        Features
+      </div>
+      <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">
+        Everything an MCP client needs, on the terminal.
+      </h2>
+    </div>
+    <a
+      href={href('/docs')}
+      class="hidden whitespace-nowrap text-sm text-muted-foreground underline decoration-muted-foreground underline-offset-4 transition hover:text-foreground hover:decoration-foreground sm:inline-block"
+      >Browse all docs →</a
+    >
+  </div>
+
+  <div class="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+    {
+      features.map((feat) => (
+        <a
+          href={href(feat.to)}
+          class="group flex flex-col gap-2 bg-background p-5 transition hover:bg-muted"
+        >
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold tracking-tight">{feat.title}</h3>
+            <span class="font-mono text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground">
+              →
+            </span>
+          </div>
+          <p class="text-sm leading-relaxed text-muted-foreground">{feat.body}</p>
+        </a>
+      ))
+    }
+  </div>
+</section>
