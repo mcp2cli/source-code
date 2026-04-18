@@ -609,16 +609,26 @@ export default function InteractiveTerminal() {
   const [wizardToken, setWizardToken] = useState(0);
   const [skip, setSkip] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
-  // Pin the terminal body to the bottom on every render — matches
-  // the natural feel of a shell where output scrolls up as new
-  // lines arrive. The user can still scroll up freely; the next
-  // tick will simply resume tailing.
+  // Auto-tail: pin the scroll container to the bottom whenever its
+  // content grows. A ResizeObserver is load-bearing here — the
+  // parent component doesn't re-render on every character the
+  // AnimatedRun child types (child owns its own state), so a plain
+  // useEffect-on-render never fires mid-animation and the terminal
+  // stops scrolling once content overflows the 420px viewport.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  });
+    const scroll = scrollRef.current;
+    const content = contentRef.current;
+    if (!scroll || !content) return;
+    const pin = () => {
+      scroll.scrollTop = scroll.scrollHeight;
+    };
+    pin();
+    const ro = new ResizeObserver(pin);
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
 
   const advanceFromRun = useCallback(() => {
     if (phase.kind !== 'running') return;
@@ -747,6 +757,7 @@ export default function InteractiveTerminal() {
         onClick={handleBodyClick}
         className={`h-[420px] overflow-y-auto overflow-x-auto px-4 py-4 font-mono text-[13px] leading-[1.55] ${TEXT_FG}`}
       >
+        <div ref={contentRef}>
         {history.map((entry) =>
           entry.kind === 'run' ? (
             <div key={entry.id} className="mb-3">
@@ -780,6 +791,7 @@ export default function InteractiveTerminal() {
             autoFocus={history.some((h) => h.kind === 'decision')}
           />
         ) : null}
+        </div>
       </div>
     </div>
   );

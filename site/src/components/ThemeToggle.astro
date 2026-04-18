@@ -49,7 +49,7 @@
       const next = isDark ? 'dark' : 'light';
       // Keep data-theme aligned with .dark so expressive-code's
       // code-block selectors track the Tailwind theme toggle.
-      html.setAttribute('data-theme', isDark ? 'one-dark-pro' : 'github-light');
+      html.setAttribute('data-theme', isDark ? 'one-dark-pro' : 'one-light');
       try {
         localStorage.setItem('theme', next);
       } catch {}

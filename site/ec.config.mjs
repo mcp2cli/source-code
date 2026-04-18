@@ -9,7 +9,7 @@ import { defineEcConfig } from 'astro-expressive-code';
 // --tok-str, --tok-com) that the interactive terminal also reads, so
 // the React demo can colour its own command lines to match.
 export default defineEcConfig({
-  themes: ['github-light', 'one-dark-pro'],
+  themes: ['one-light', 'one-dark-pro'],
   // Use EC's attribute-based theme selection — it emits
   // `[data-theme="github-light"]` / `[data-theme="one-dark-pro"]`
   // which are clean, mutually-exclusive selectors. BaseLayout.astro

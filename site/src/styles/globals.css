@@ -19,21 +19,20 @@
     --code-bg: #eef2f7;
     --code-chrome: #e1e7ef;
     --code-hairline: #d6dde6;
-    --code-fg: #24292e;
-    --code-fg-muted: #6a737d;
-    --code-ok: #22863a;
+    --code-fg: #383a42;
+    --code-fg-muted: #a0a1a7;
+    --code-ok: #387138;
 
-    /* zsh-style accent tokens used by the interactive terminal.
-       Colours lifted straight from what Shiki's github-light theme
-       emits for each bash scope — so a command rendered inline in
-       the demo looks exactly the same as one inside a markdown
-       fence. Any change here should mirror a Shiki inspection. */
-    --tok-cmd: #6f42c1;    /* function / command name   — purple */
-    --tok-flag: #005cc5;   /* option (--foo, -x)        — blue   */
-    --tok-str: #032f62;    /* quoted string             — navy   */
-    --tok-url: #032f62;    /* url / path (shell string) — navy   */
-    --tok-op: #bf3441;     /* pipe / redirect operators — red    */
-    --tok-com: #616972;    /* comment                   — grey   */
+    /* Match Shiki's one-light palette for bash so the interactive
+       terminal reads as the light-mode counterpart of one-dark-pro:
+       blue commands, orange-brown flags, forest-green strings, soft
+       grey comments, no accent for operators. */
+    --tok-cmd: #3360c1;    /* function / command name — blue         */
+    --tok-flag: #875d01;   /* option (--foo, -x)      — orange-brown */
+    --tok-str: #387138;    /* quoted string           — green        */
+    --tok-url: #387138;    /* url / path              — green        */
+    --tok-op: #383a42;     /* pipe / redirect ops     — default fg   */
+    --tok-com: #646568;    /* comment                 — muted grey   */
   }
 
   .dark {
