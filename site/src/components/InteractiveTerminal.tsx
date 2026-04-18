@@ -610,17 +610,14 @@ export default function InteractiveTerminal() {
   const [skip, setSkip] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll the terminal body to the bottom as new lines arrive
-  // or a fresh wizard is appended. Only pins when the user is already
-  // near the bottom; leaves them alone if they've scrolled up to read
-  // earlier output.
+  // Pin the terminal body to the bottom on every render — matches
+  // the natural feel of a shell where output scrolls up as new
+  // lines arrive. The user can still scroll up freely; the next
+  // tick will simply resume tailing.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom < 120) {
-      el.scrollTop = el.scrollHeight;
-    }
+    el.scrollTop = el.scrollHeight;
   });
 
   const advanceFromRun = useCallback(() => {
