@@ -12,7 +12,7 @@ During a tool call, the server may send an `elicitation/create` request asking t
 
 ### How It Looks
 
-```
+```text
 --- elicitation request ---
 Please provide additional information:
   Name (Your full name) [required]: John Doe
@@ -56,7 +56,7 @@ The server may send a `sampling/createMessage` request during tool execution, as
 
 ### How It Looks
 
-```
+```text
 --- sampling request ---
 The server requests a model response.
 Model hint: claude-3-5-sonnet

@@ -350,7 +350,7 @@ work trigger-deployment
 The server sends an `elicitation/create` request. mcp2cli prompts
 interactively:
 
-```
+```text
 --- elicitation request ---
 Deployment requires additional confirmation:
   Target region (AWS region) [required]: us-east-1
@@ -735,7 +735,7 @@ work doctor
 ```
 
 Output:
-```
+```yaml
 config: work
 profile: bridge
 transport: streamable_http
@@ -1133,7 +1133,7 @@ If the server cancels a pending request it sent to you (e.g. an elicitation
 or sampling request), mcp2cli handles the `notifications/cancelled`
 notification and logs the reason:
 
-```
+```json
 [work] request cancelled by server: timeout exceeded
 ```
 

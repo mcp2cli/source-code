@@ -149,7 +149,7 @@ Following the [Console Do Not Track](https://consoledonottrack.com/) standard us
 
 ### Precedence
 
-```
+```text
 --no-telemetry flag > MCP2CLI_TELEMETRY env > DO_NOT_TRACK env > config enabled field
 ```
 
@@ -161,7 +161,7 @@ If any of these signals "off", telemetry is fully disabled for that invocation.
 
 Events are written to:
 
-```
+```text
 ~/.local/share/mcp2cli/telemetry.ndjson
 ```
 

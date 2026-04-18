@@ -6,7 +6,7 @@ Complete reference for every mcp2cli command, flag, and option.
 
 ## Invocation Modes
 
-```
+```text
 mcp2cli [--json] [--output <FORMAT>] [--timeout <SECS>] <command>
 mcp2cli [--json] [--output <FORMAT>] [--timeout <SECS>] <config-name> <command>
 mcp2cli --url <URL> [--json] [--timeout <SECS>] <command>

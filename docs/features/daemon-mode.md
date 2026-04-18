@@ -76,7 +76,7 @@ mcp2cli daemon status
 
 Output:
 
-```
+```yaml
 my-server: running (pid 12345, socket /home/user/.local/share/mcp2cli/instances/my-server/daemon.sock)
 other-server: not running
 ```
@@ -118,7 +118,7 @@ The detection happens in `build_client()`:
 
 The daemon communicates over a Unix socket using a simple newline-delimited JSON protocol:
 
-```
+```text
 Client → Daemon:  {"InvokeAction":{"capability":"echo","arguments":{"message":"hello"},"background":false}}\n
 Daemon → Client:  {"Action":{"message":"...","capability":"echo","content":[...],"data":{...}}}\n
 ```

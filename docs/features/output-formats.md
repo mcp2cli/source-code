@@ -14,7 +14,7 @@ Optimized for terminal readability:
 work ls
 ```
 
-```
+```text
 echo          tool      Echoes back the input string
 add           tool      Adds two numbers
 readme        resource  demo://resource/readme.md
@@ -56,7 +56,7 @@ Newline-delimited JSON — one JSON object per line:
 work --output ndjson ls
 ```
 
-```
+```json
 {"app_id":"work","command":"discover","summary":"discovered 14 capabilities","lines":[...],"data":{...}}
 ```
 

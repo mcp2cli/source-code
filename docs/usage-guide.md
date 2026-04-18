@@ -238,7 +238,7 @@ Discovery results are cached per config. If a live discovery call fails (e.g.
 the server is down), mcp2cli falls back to the cached inventory with an
 explicit stale-data warning:
 
-```
+```text
 [work] live discovery failed; returned cached inventory instead
 ```
 
@@ -271,7 +271,7 @@ work echo --message hello
 
 Output:
 
-```
+```yaml
 title: Echo Tool
 description: Echoes back the input string
 Echo: hello
@@ -300,7 +300,7 @@ work echo --help
 
 Output:
 
-```
+```yaml
 Echoes back the input
 
 USAGE: work echo --message <MESSAGE>
@@ -360,7 +360,7 @@ work get "demo://resource/static/document/architecture.md"
 
 Output:
 
-```
+```yaml
 uri: demo://resource/static/document/architecture.md
 mime_type: text/markdown
 content:
@@ -415,7 +415,7 @@ work simple-prompt
 
 Output:
 
-```
+```yaml
 prompt: simple-prompt
 output:
   This is a simple prompt without arguments.
@@ -508,7 +508,7 @@ work auth login
 
 For **real servers** (non-demo), this prompts for a bearer token via stdin:
 
-```
+```text
 enter bearer token for work: <paste token>
 ```
 
@@ -526,7 +526,7 @@ work auth status
 
 Shows the current authentication state:
 
-```
+```yaml
 auth: authenticated
 account: bearer-token (stored)
 ```
@@ -549,7 +549,7 @@ work --json auth status
 
 Tokens are stored per-config in the data directory:
 
-```
+```text
 data/instances/<config-name>/tokens.json
 ```
 
@@ -675,7 +675,7 @@ work jobs list
 
 Output:
 
-```
+```text
 abc-123  running  invoke
 def-456  completed  invoke
 ```
@@ -715,7 +715,7 @@ Watch emits runtime events as the job progresses and completes.
 
 ### Job lifecycle
 
-```
+```text
 --background → [queued] → [running] → [completed | canceled | failed]
 ```
 
@@ -792,7 +792,7 @@ work doctor
 
 Shows a comprehensive health summary:
 
-```
+```yaml
 config: work
 profile: bridge
 transport: stdio
@@ -859,7 +859,7 @@ events:
 
 Human-readable one-line events on stderr:
 
-```
+```json
 [work] invoking capability echo
 [work] job abc-123 running watch started
 [work] server info (db): Connection pool created
@@ -951,7 +951,7 @@ within the response stream.
 When a server sends `sampling/createMessage` during a tool call, mcp2cli
 presents the request interactively and collects a human response:
 
-```
+```text
 --- sampling request ---
 The server requests a model response.
 Model hint: claude-3-5-sonnet
@@ -1085,7 +1085,7 @@ Profiles are always optional. Without one, the CLI uses the server's metadata.
 
 Human-readable text lines:
 
-```
+```text
 echo  tool  Echoes back the input string
 ```
 

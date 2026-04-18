@@ -198,7 +198,7 @@ infra cluster rollback               # Custom group
 
 ## File Layout
 
-```
+```text
 ~/.local/share/mcp2cli/
 ├── configs/
 │   ├── dev.yaml

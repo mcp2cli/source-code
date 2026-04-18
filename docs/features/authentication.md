@@ -50,7 +50,7 @@ sequenceDiagram
 
 Tokens are persisted per-config at:
 
-```
+```text
 ~/.local/share/mcp2cli/instances/<name>/tokens.json
 ```
 

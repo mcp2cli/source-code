@@ -45,7 +45,7 @@ events:
 
 Output:
 
-```
+```json
 [progress] Deploying: 45% complete
 [server_log] INFO: Connection pool warmed up
 [info] Discovery cache refreshed (14 capabilities)
@@ -109,7 +109,7 @@ Connect from a browser or `curl`:
 curl -N http://127.0.0.1:9091/events
 ```
 
-```
+```yaml
 data: {"type":"progress","app_id":"work","message":"45%"}
 
 data: {"type":"info","app_id":"work","message":"Done"}

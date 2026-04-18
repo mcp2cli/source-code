@@ -534,7 +534,7 @@ echo "  prompts:          $PROMPT_COUNT"
 
 Output:
 
-```
+```text
 MCP Spec Coverage Matrix
 ========================
 

@@ -10,7 +10,7 @@ Building an MCP server means constantly testing whether your tools, resources, a
 
 With mcp2cli, the loop is:
 
-```
+```text
 Edit server → mcp2cli calls it → see result → repeat
 ```
 

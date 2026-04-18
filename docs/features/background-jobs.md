@@ -51,7 +51,7 @@ When `--background` is used:
 work jobs list
 ```
 
-```
+```text
 job_abc123  deploy       running   task_xyz789  2026-03-30T10:15:30Z
 job_def456  export       completed task_uvw012  2026-03-30T09:30:00Z
 ```

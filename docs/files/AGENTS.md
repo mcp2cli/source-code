@@ -23,7 +23,7 @@ One binary. Unlimited servers. Zero protocol knowledge required at the terminal.
 
 ## Repository Location
 
-```
+```text
 .                     ← this project
   src/
     app/               entry-point: build() + run() → AppState
@@ -106,7 +106,7 @@ resolved in `dispatch/mod.rs` under `AdHocTransport`.
 
 ## Key Data Flow
 
-```
+```text
 argv
   → dispatch::resolve_invocation()
       → DispatchTarget::Host   → RuntimeHost::run_host()  → HostCommand handlers

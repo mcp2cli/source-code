@@ -63,7 +63,7 @@ Tool `inputSchema` and prompt `arguments` are converted to real CLI flags:
 
 Dotted tool names automatically become nested subcommands:
 
-```
+```text
 Server tools:
   email.send
   email.reply

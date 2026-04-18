@@ -8,14 +8,14 @@ Mistype a command? mcp2cli suggests the closest match instead of a cryptic error
 
 When you type a command that doesn't exist, mcp2cli computes the [Levenshtein edit distance](https://en.wikipedia.org/wiki/Levenshtein_distance) between your input and all known commands from the server's manifest. If a close match is found, you get a helpful suggestion:
 
-```
+```shellsession
 $ work ecoh --message hello
 error: unrecognized subcommand 'ecoh'
 
 Did you mean: echo?
 ```
 
-```
+```shellsession
 $ work serch --query "test"
 error: unrecognized subcommand 'serch'
 
@@ -56,7 +56,7 @@ Levenshtein distance counts the minimum number of:
 
 When several commands are close, all are listed:
 
-```
+```shellsession
 $ work ad --a 1 --b 2
 error: unrecognized subcommand 'ad'
 

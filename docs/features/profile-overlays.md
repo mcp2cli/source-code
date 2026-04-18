@@ -149,7 +149,7 @@ The overlay is applied **after** the manifest is built from discovery, transform
 
 Given a server with these tools:
 
-```
+```text
 email.send, email.reply, email.draft.create, labels.add,
 get-tiny-image, long-running-operation, debug-internal, echo
 ```

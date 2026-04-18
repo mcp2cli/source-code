@@ -6,7 +6,7 @@ Complete reference for the mcp2cli YAML configuration schema.
 
 ## Config File Location
 
-```
+```text
 ~/.local/share/mcp2cli/configs/<name>.yaml
 ```
 
@@ -380,7 +380,7 @@ Verb for the resource read command.
 
 Any config field can be overridden via environment variable:
 
-```
+```text
 MCP2CLI_<PATH__TO__FIELD>=<value>
 ```
 
