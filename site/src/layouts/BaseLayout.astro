@@ -48,11 +48,14 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
       (() => {
         try {
           const stored = localStorage.getItem('theme');
-          const prefers = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          if (stored === 'dark' || (!stored && prefers)) {
+          // Dark by default — only fall back to light if the user has
+          // explicitly opted into it via the theme toggle.
+          if (stored !== 'light') {
             document.documentElement.classList.add('dark');
           }
-        } catch {}
+        } catch {
+          document.documentElement.classList.add('dark');
+        }
       })();
     </script>
   </head>
