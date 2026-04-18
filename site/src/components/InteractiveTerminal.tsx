@@ -127,6 +127,88 @@ const TEXT_MUTED = 'text-[color:var(--code-fg-muted)]';
 const TEXT_OK = 'text-[color:var(--code-ok)]';
 
 // -------------------------------------------------------------
+// Shell-command tokenizer — enough to get a zsh-ish vibe on each
+// prompt line without pulling a full grammar in. The first
+// non-whitespace token in the *line* is the command; everything
+// else follows a small set of pattern rules. Multi-line commands
+// (backslash continuations) restart the "first token" heuristic
+// on each logical line.
+// -------------------------------------------------------------
+
+type Tok = { text: string; cls: string | null };
+
+const URL_RE = /^(?:https?:\/\/|file:\/\/|\.?\.?\/|~\/)[\w\-./%?&=#:{}@~]*$/i;
+const FLAG_RE = /^--?[A-Za-z][\w-]*/;
+const STRING_RE = /^["'].*["']$/;
+
+function tokenizeShell(text: string): Tok[] {
+  const out: Tok[] = [];
+  // Split preserving whitespace runs; newlines + any space.
+  const parts = text.split(/(\s+)/);
+  let sawFirstWord = false;
+  for (const part of parts) {
+    if (part === '') continue;
+    if (/^\s+$/.test(part)) {
+      if (/\n/.test(part)) sawFirstWord = false; // next logical line
+      out.push({ text: part, cls: null });
+      continue;
+    }
+    if (!sawFirstWord) {
+      sawFirstWord = true;
+      // A continuation line may start with a flag — let the flag
+      // matcher re-classify below if so.
+      if (FLAG_RE.test(part)) {
+        out.push({ text: part, cls: 'tok-flag' });
+      } else {
+        out.push({ text: part, cls: 'tok-cmd' });
+      }
+      continue;
+    }
+    if (FLAG_RE.test(part)) {
+      out.push({ text: part, cls: 'tok-flag' });
+    } else if (STRING_RE.test(part)) {
+      out.push({ text: part, cls: 'tok-str' });
+    } else if (URL_RE.test(part)) {
+      out.push({ text: part, cls: 'tok-url' });
+    } else {
+      out.push({ text: part, cls: null });
+    }
+  }
+  return out;
+}
+
+function tokenClass(cls: string | null): string {
+  switch (cls) {
+    case 'tok-cmd':
+      return 'text-[color:var(--tok-cmd)]';
+    case 'tok-flag':
+      return 'text-[color:var(--tok-flag)]';
+    case 'tok-str':
+      return 'text-[color:var(--tok-str)]';
+    case 'tok-url':
+      return 'text-[color:var(--tok-url)]';
+    default:
+      return TEXT_FG;
+  }
+}
+
+function HighlightedCommand({ text }: { text: string }) {
+  const tokens = tokenizeShell(text);
+  return (
+    <>
+      {tokens.map((t, i) => {
+        const cls = t.cls ? tokenClass(t.cls) : TEXT_FG;
+        return (
+          <span key={i} className={cls}>
+            {t.text}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+// -------------------------------------------------------------
 // Internal run model — a Run is a sequence of Line records that
 // the component animates one char at a time.
 // -------------------------------------------------------------
@@ -168,11 +250,21 @@ function LineBody({
   return (
     <div className="whitespace-pre-wrap">
       <span className={`${TEXT_MUTED} select-none`}>$ </span>
-      <span className={TEXT_FG}>{revealed}</span>
-      {isActive ? <Caret /> : null}
-      {!isActive && line.comment ? (
-        <span className={TEXT_MUTED}>  {line.comment}</span>
-      ) : null}
+      {isActive ? (
+        <>
+          <span className={TEXT_FG}>{revealed}</span>
+          <Caret />
+        </>
+      ) : (
+        <>
+          <HighlightedCommand text={revealed} />
+          {line.comment ? (
+            <span className={`text-[color:var(--tok-com)]`}>
+              {'  ' + line.comment}
+            </span>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -208,9 +300,11 @@ function StaticLines({ lines }: { lines: Line[] }) {
         return (
           <div key={i} className="whitespace-pre-wrap">
             <span className={`${TEXT_MUTED} select-none`}>$ </span>
-            <span className={TEXT_FG}>{line.text}</span>
+            <HighlightedCommand text={line.text} />
             {line.comment ? (
-              <span className={TEXT_MUTED}>  {line.comment}</span>
+              <span className={`text-[color:var(--tok-com)]`}>
+                {'  ' + line.comment}
+              </span>
             ) : null}
           </div>
         );

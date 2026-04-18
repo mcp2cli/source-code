@@ -1,44 +1,17 @@
 import { defineEcConfig } from 'astro-expressive-code';
 
-// Monochrome themes so every fenced code block matches the
-// interactive terminal on the landing: uniform foreground, muted
-// comments, no accent colours for functions / strings / keywords /
-// numbers. The only colour difference on the page is the scaffolding
-// (chrome, copy button) — content reads as plain text.
-//
-// Themes are expressed as Shiki theme objects. Scope coverage
-// matches the common TextMate scopes that would otherwise pull in
-// accent colours; anything not listed inherits the `foreground`
-// setting, i.e. the same shade as the commands in the hero terminal.
-
-const commentScopes = [
-  'comment',
-  'punctuation.definition.comment',
-  'string.comment',
-];
-
-const mcp2cliLight = {
-  name: 'mcp2cli-light',
-  type: 'light',
-  settings: [
-    { settings: { background: '#eef2f7', foreground: '#24292e' } },
-    { scope: commentScopes, settings: { foreground: '#6a737d' } },
-  ],
-};
-
-const mcp2cliDark = {
-  name: 'mcp2cli-dark',
-  type: 'dark',
-  settings: [
-    { settings: { background: '#0a0a0a', foreground: '#ffffff' } },
-    { scope: commentScopes, settings: { foreground: '#7a7a7a' } },
-  ],
-};
-
+// Colourful zsh-style themes so every code block and the interactive
+// terminal share a vivid-on-contrast palette instead of flat text.
+// - light: github-light — blue / purple / navy / red on off-white
+// - dark:  vesper        — near-white text with peach functions,
+//                          cyan strings, muted comment-grey
+// Both write CSS vars for common tokens (--tok-cmd, --tok-flag,
+// --tok-str, --tok-com) that the interactive terminal also reads, so
+// the React demo can colour its own command lines to match.
 export default defineEcConfig({
-  themes: [mcp2cliLight, mcp2cliDark],
+  themes: ['github-light', 'vesper'],
   themeCssSelector: (theme) =>
-    theme.name === 'mcp2cli-dark' ? 'html.dark' : 'html:not(.dark)',
+    theme.name === 'vesper' ? 'html.dark' : 'html:not(.dark)',
   styleOverrides: {
     borderRadius: '0.5rem',
     borderColor: 'var(--code-hairline)',

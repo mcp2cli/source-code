@@ -22,6 +22,15 @@
     --code-fg: #24292e;
     --code-fg-muted: #6a737d;
     --code-ok: #22863a;
+
+    /* zsh-style accent tokens used by the interactive terminal.
+       Mirror the github-light palette so a command rendered inline in
+       the demo looks the same as one inside a markdown fence. */
+    --tok-cmd: #6f42c1;    /* function / command name — purple */
+    --tok-flag: #d73a49;   /* option / flag           — red    */
+    --tok-str: #032f62;    /* quoted string           — navy   */
+    --tok-url: #005cc5;    /* url / path              — blue   */
+    --tok-com: #6a737d;    /* comment                 — grey   */
   }
 
   .dark {
@@ -39,6 +48,13 @@
     --code-fg: #ffffff;
     --code-fg-muted: #7a7a7a;
     --code-ok: #4ade80;
+
+    /* Match the vesper dark-theme palette for the interactive demo. */
+    --tok-cmd: #ffc799;    /* function / command name — peach  */
+    --tok-flag: #a0a0a0;   /* option / flag           — grey   */
+    --tok-str: #99ffe4;    /* quoted string           — cyan   */
+    --tok-url: #99ffe4;    /* url / path              — cyan   */
+    --tok-com: #7a7a7a;    /* comment                 — grey   */
   }
 
   * {
