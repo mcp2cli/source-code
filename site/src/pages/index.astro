@@ -59,9 +59,12 @@ const agentPrompt = `Read https://mcp2cli.dev/SKILL.md and set up a cli for my m
         </div>
         <div class="w-full">
           <div class="mb-2 text-xs text-muted-foreground">
-            Or install with an AI agent — paste this into your assistant:
+            Or install with an <code
+              class="rounded border border-border bg-subtle px-1.5 py-0.5 font-mono text-[11px]"
+              >AI agent</code
+            > — paste this into your assistant:
           </div>
-          <Code code={agentPrompt} lang="md" />
+          <Code code={agentPrompt} lang="plaintext" />
         </div>
         <a
           href={href('/docs/files/install')}

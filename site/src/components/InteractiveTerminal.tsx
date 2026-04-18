@@ -113,6 +113,20 @@ const jitterDelay = () =>
   CHAR_DELAY_MS + Math.floor(Math.random() * CHAR_JITTER_MS);
 
 // -------------------------------------------------------------
+// Tailwind arbitrary-value classes that map onto the shared
+// code-block CSS variables (defined in globals.css, swapped per
+// theme). Keeping them in one place so the interactive terminal
+// stays in lockstep with expressive-code fences.
+// -------------------------------------------------------------
+
+const BODY_BG = 'bg-[color:var(--code-bg)]';
+const TITLEBAR_BG = 'bg-[color:var(--code-chrome)]';
+const BORDER = 'border-[color:var(--code-hairline)]';
+const TEXT_FG = 'text-[color:var(--code-fg)]';
+const TEXT_MUTED = 'text-[color:var(--code-fg-muted)]';
+const TEXT_OK = 'text-[color:var(--code-ok)]';
+
+// -------------------------------------------------------------
 // Internal run model — a Run is a sequence of Line records that
 // the component animates one char at a time.
 // -------------------------------------------------------------
@@ -141,11 +155,7 @@ function LineBody({
 
   if (line.kind === 'output') {
     const toneClass =
-      line.tone === 'ok'
-        ? 'text-emerald-400'
-        : line.tone === 'warn'
-          ? 'text-amber-400'
-          : 'text-zinc-400';
+      line.tone === 'ok' ? TEXT_OK : line.tone === 'warn' ? 'text-amber-400' : TEXT_MUTED;
     return (
       <div className={`whitespace-pre-wrap ${toneClass}`}>
         {revealed}
@@ -155,14 +165,13 @@ function LineBody({
   }
 
   // Prompt line.
-  const body = revealed;
   return (
     <div className="whitespace-pre-wrap">
-      <span className="text-zinc-500 select-none">$ </span>
-      <span className="text-zinc-100">{body}</span>
+      <span className={`${TEXT_MUTED} select-none`}>$ </span>
+      <span className={TEXT_FG}>{revealed}</span>
       {isActive ? <Caret /> : null}
       {!isActive && line.comment ? (
-        <span className="text-zinc-500">  {line.comment}</span>
+        <span className={TEXT_MUTED}>  {line.comment}</span>
       ) : null}
     </div>
   );
@@ -172,7 +181,7 @@ function Caret() {
   return (
     <span
       aria-hidden="true"
-      className="ml-[1px] inline-block h-[1em] w-[0.55em] -translate-y-[1px] translate-x-0 bg-zinc-200 align-middle animate-[terminal-blink_1.1s_step-end_infinite]"
+      className="ml-[1px] inline-block h-[1em] w-[0.55em] -translate-y-[1px] bg-[color:var(--code-fg)] align-middle animate-[terminal-blink_1.1s_step-end_infinite]"
     />
   );
 }
@@ -189,11 +198,7 @@ function StaticLines({ lines }: { lines: Line[] }) {
           return <div key={i} className="h-[1.5em]" aria-hidden="true" />;
         if (line.kind === 'output') {
           const tone =
-            line.tone === 'ok'
-              ? 'text-emerald-400'
-              : line.tone === 'warn'
-                ? 'text-amber-400'
-                : 'text-zinc-400';
+            line.tone === 'ok' ? TEXT_OK : line.tone === 'warn' ? 'text-amber-400' : TEXT_MUTED;
           return (
             <div key={i} className={`whitespace-pre-wrap ${tone}`}>
               {line.text}
@@ -202,10 +207,10 @@ function StaticLines({ lines }: { lines: Line[] }) {
         }
         return (
           <div key={i} className="whitespace-pre-wrap">
-            <span className="text-zinc-500 select-none">$ </span>
-            <span className="text-zinc-100">{line.text}</span>
+            <span className={`${TEXT_MUTED} select-none`}>$ </span>
+            <span className={TEXT_FG}>{line.text}</span>
             {line.comment ? (
-              <span className="text-zinc-500">  {line.comment}</span>
+              <span className={TEXT_MUTED}>  {line.comment}</span>
             ) : null}
           </div>
         );
@@ -253,7 +258,6 @@ function AnimatedRun({
 
     const line = run.lines[lineIdx];
 
-    // Blank lines: wait a tick and advance.
     if (line.kind === 'blank') {
       const t = setTimeout(() => {
         setLineIdx((i) => i + 1);
@@ -270,7 +274,6 @@ function AnimatedRun({
       return () => clearTimeout(t);
     }
 
-    // End of line: pause briefly (longer after a command) then advance.
     const pause = line.kind === 'prompt' ? PROMPT_PAUSE_MS : LINE_DELAY_MS;
     const t = setTimeout(() => {
       setLineIdx((i) => i + 1);
@@ -354,9 +357,9 @@ function Wizard({
       ref={containerRef}
       tabIndex={0}
       onKeyDown={handleKey}
-      className="mt-3 rounded border border-zinc-800 bg-[#0c0c0c] p-3 outline-none focus-visible:ring-1 focus-visible:ring-zinc-600"
+      className={`mt-3 rounded border ${BORDER} ${BODY_BG} p-3 outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--code-fg-muted)]`}
     >
-      <div className="mb-2 text-zinc-200">{question}</div>
+      <div className={`mb-2 ${TEXT_FG}`}>{question}</div>
       <ul className="space-y-0.5">
         {options.map((opt, i) => {
           const active = i === selected;
@@ -368,26 +371,24 @@ function Wizard({
                 onClick={() => onPick(opt)}
                 className={`flex w-full items-baseline gap-2 rounded px-2 py-1 text-left transition ${
                   active
-                    ? 'bg-zinc-900 text-zinc-100'
-                    : 'text-zinc-400 hover:text-zinc-200'
+                    ? `${TITLEBAR_BG} ${TEXT_FG}`
+                    : `${TEXT_MUTED} hover:${TEXT_FG}`
                 }`}
               >
                 <span
                   aria-hidden="true"
-                  className={`w-3 text-center ${active ? 'text-emerald-400' : 'text-transparent'}`}
+                  className={`w-3 text-center ${active ? TEXT_OK : 'text-transparent'}`}
                 >
                   ▸
                 </span>
                 <span className="font-medium">{opt.label}</span>
-                {opt.hint ? (
-                  <span className="text-zinc-500">— {opt.hint}</span>
-                ) : null}
+                {opt.hint ? <span className={TEXT_MUTED}>— {opt.hint}</span> : null}
               </button>
             </li>
           );
         })}
       </ul>
-      <div className="mt-3 text-[11px] text-zinc-600">
+      <div className={`mt-3 text-[11px] ${TEXT_MUTED} opacity-80`}>
         ↑↓ select · Enter to run · 1–{options.length} shortcut
       </div>
     </div>
@@ -414,7 +415,6 @@ export default function InteractiveTerminal() {
   const [skip, setSkip] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Keep scroll position pinned to the bottom as content streams in.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -424,9 +424,6 @@ export default function InteractiveTerminal() {
   const advanceFromRun = useCallback(() => {
     const next = SCRIPT[(phase as { stepIdx: number }).stepIdx + 1];
     if (!next) {
-      // Absorb the finished intro run into history so it stays on screen,
-      // then present the wizard (this won't happen for our script since
-      // the last step is always a wizard, but kept for safety).
       if (phase.kind === 'running') {
         setHistory((h) => [...h, phase.run]);
       }
@@ -454,13 +451,12 @@ export default function InteractiveTerminal() {
       setPhase({
         kind: 'running',
         run: { id: `${opt.id}-${Date.now()}`, lines: opt.run },
-        stepIdx: phase.stepIdx, // stay on the wizard step so we loop back
+        stepIdx: phase.stepIdx,
       });
     },
     [phase],
   );
 
-  // When a wizard-triggered run finishes, push it to history and return to the wizard.
   const handleRunDone = useCallback(() => {
     if (phase.kind !== 'running') return;
     const wizardStep = SCRIPT[phase.stepIdx];
@@ -488,20 +484,18 @@ export default function InteractiveTerminal() {
     }
   }, []);
 
-  // Click-to-skip: tap the body mid-animation to fast-forward the
-  // current run. Resets on restart / next wizard pick.
   const handleBodyClick = useCallback(() => {
     if (phase.kind === 'running') setSkip(true);
   }, [phase]);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-800 bg-[#0a0a0a] shadow-xl">
+    <div className={`overflow-hidden rounded-lg border ${BORDER} ${BODY_BG} shadow-sm`}>
       {/* titlebar */}
-      <div className="flex items-center justify-between border-b border-zinc-800 bg-[#141414] px-4 py-2 text-xs text-zinc-500">
+      <div className={`flex items-center justify-between border-b ${BORDER} ${TITLEBAR_BG} px-4 py-2 text-xs ${TEXT_MUTED}`}>
         <div className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
-          <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
-          <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
+          <span className="h-2.5 w-2.5 rounded-full bg-[color:var(--code-hairline)]" />
+          <span className="h-2.5 w-2.5 rounded-full bg-[color:var(--code-hairline)]" />
+          <span className="h-2.5 w-2.5 rounded-full bg-[color:var(--code-hairline)]" />
         </div>
         <div className="font-mono">mcp2cli — live demo</div>
         <button
@@ -509,7 +503,7 @@ export default function InteractiveTerminal() {
           onClick={restart}
           aria-label="Restart demo"
           title="Restart"
-          className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-600"
+          className={`flex h-5 w-5 items-center justify-center rounded ${TEXT_MUTED} transition hover:${TEXT_FG} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--code-fg-muted)]`}
         >
           <svg
             viewBox="0 0 24 24"
@@ -533,7 +527,7 @@ export default function InteractiveTerminal() {
       <div
         ref={scrollRef}
         onClick={handleBodyClick}
-        className="h-[420px] overflow-y-auto overflow-x-auto px-4 py-4 font-mono text-[13px] leading-[1.55] text-zinc-200"
+        className={`h-[420px] overflow-y-auto overflow-x-auto px-4 py-4 font-mono text-[13px] leading-[1.55] ${TEXT_FG}`}
       >
         {history.map((run) => (
           <div key={run.id} className="mb-3">

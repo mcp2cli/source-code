@@ -19,6 +19,9 @@
     --code-bg: #eef2f7;
     --code-chrome: #e1e7ef;
     --code-hairline: #d6dde6;
+    --code-fg: #24292e;
+    --code-fg-muted: #6a737d;
+    --code-ok: #22863a;
   }
 
   .dark {
@@ -33,6 +36,9 @@
     --code-bg: #0a0a0a;
     --code-chrome: #141414;
     --code-hairline: #1f1f1f;
+    --code-fg: #ffffff;
+    --code-fg-muted: #7a7a7a;
+    --code-ok: #4ade80;
   }
 
   * {
