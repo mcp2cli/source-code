@@ -33,7 +33,7 @@
     --tok-str: #032f62;    /* quoted string             — navy   */
     --tok-url: #032f62;    /* url / path (shell string) — navy   */
     --tok-op: #bf3441;     /* pipe / redirect operators — red    */
-    --tok-com: #6a737d;    /* comment                   — grey   */
+    --tok-com: #616972;    /* comment                   — grey   */
   }
 
   .dark {
@@ -58,7 +58,7 @@
     --tok-str: #99ffe4;    /* quoted string             — cyan  */
     --tok-url: #99ffe4;    /* url / path (shell string) — cyan  */
     --tok-op: #a0a0a0;     /* pipe / redirect operators — grey  */
-    --tok-com: #7a7a7a;    /* comment                   — grey  */
+    --tok-com: #8b8b8b;    /* comment                   — grey  */
   }
 
   * {

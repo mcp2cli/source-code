@@ -178,7 +178,10 @@ function tokenizeShell(text: string): Tok[] {
     } else if (URL_RE.test(part)) {
       out.push({ text: part, cls: 'tok-url' });
     } else {
-      out.push({ text: part, cls: null });
+      // Bare arguments (subcommands, values, file paths without a
+      // leading ./) — Shiki's bash grammar paints these as strings,
+      // so we match that for parity with the docs fences.
+      out.push({ text: part, cls: 'tok-str' });
     }
   }
   return out;
