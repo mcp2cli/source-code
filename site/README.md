@@ -2,7 +2,7 @@
 
 Astro-powered documentation + landing page for mcp2cli. Deployed to
 GitHub Pages on every push to `main` that touches `site/**` or
-`docs/**`. Live at `https://mcp2cli.github.io/source-code/`.
+`docs/**`. Live at `https://mcp2cli.dev/`.
 
 ## Stack
 
@@ -48,7 +48,7 @@ convention](https://llmstxt.org).
 ```bash
 cd site
 pnpm install
-pnpm dev            # http://localhost:4321/source-code/
+pnpm dev            # http://localhost:4321/
 pnpm build          # → dist/
 pnpm preview        # serve the built output
 ```
@@ -64,9 +64,14 @@ enable GitHub Pages for the repo:
 Subsequent pushes to `main` that touch `site/**` or `docs/**` deploy
 automatically.
 
-## Base path
+## Custom domain
 
-The site lives at `/source-code/` under `mcp2cli.github.io`. The base
-path is pinned in `astro.config.mjs` (`base: '/source-code'`). To move
-to a custom domain later, set the Pages custom domain, drop a `CNAME`
-file in `public/`, and change `base` to `'/'`.
+The site is served from `mcp2cli.dev` via GitHub Pages. The domain is
+pinned by:
+
+- `public/CNAME` (contents: `mcp2cli.dev`) — copied into the built
+  artifact so the custom-domain setting persists across deploys.
+- `astro.config.mjs` — `site: 'https://mcp2cli.dev'`, `base: '/'`.
+
+If the custom domain ever needs to be retired, remove `public/CNAME`,
+flip `base` back to `'/<repo>'`, and update the Pages settings.

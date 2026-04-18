@@ -6,8 +6,8 @@ import tailwind from '@astrojs/tailwind';
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://mcp2cli.github.io',
-  base: '/source-code',
+  site: 'https://mcp2cli.dev',
+  base: '/',
   trailingSlash: 'never',
   integrations: [
     react(),

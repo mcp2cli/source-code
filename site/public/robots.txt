@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://mcp2cli.github.io/source-code/sitemap-index.xml
+Sitemap: https://mcp2cli.dev/sitemap-index.xml
