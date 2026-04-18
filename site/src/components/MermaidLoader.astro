@@ -1,0 +1,88 @@
+---
+// Conditionally loads mermaid.js from a pinned ESM CDN and renders any
+// `<pre class="mermaid">` blocks on the page. The remark-mermaid plugin
+// rewrites ```mermaid code fences into exactly this shape. No-op if no
+// mermaid blocks exist — keeps pages without diagrams zero-JS.
+---
+
+<script>
+  type MermaidApi = {
+    initialize: (config: Record<string, unknown>) => void;
+    run: (config: { nodes: Element[] }) => Promise<void>;
+  };
+
+  async function renderMermaid() {
+    const nodes = document.querySelectorAll<HTMLElement>('pre.mermaid');
+    if (nodes.length === 0) return;
+
+    const isDark = document.documentElement.classList.contains('dark');
+
+    // Pinned CDN import; loaded lazily so zero-diagram pages stay JS-free.
+    const mod: { default: MermaidApi } = await import(
+      /* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs'
+    );
+    const mermaid = mod.default;
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: isDark ? 'dark' : 'default',
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, "JetBrains Mono", monospace',
+      themeVariables: {
+        background: 'transparent',
+      },
+      securityLevel: 'strict',
+    });
+
+    await mermaid.run({ nodes: Array.from(nodes) });
+  }
+
+  // Run now for fresh loads, and again if the theme flips (mermaid needs
+  // a fresh render with the new palette; cheapest path is a reload).
+  if (document.readyState !== 'loading') {
+    renderMermaid();
+  } else {
+    document.addEventListener('DOMContentLoaded', renderMermaid);
+  }
+
+  // Flush the rendered SVGs and re-run on theme toggle so diagrams track
+  // light/dark. Costs one extra render per toggle; acceptable.
+  const themeBtn = document.getElementById('theme-toggle');
+  if (themeBtn) {
+    themeBtn.addEventListener('click', () => {
+      // Defer past the class-toggle inside the toggle's own handler.
+      setTimeout(() => {
+        document.querySelectorAll<HTMLElement>('pre.mermaid').forEach((el) => {
+          if (el.dataset.mermaidSource) {
+            el.textContent = el.dataset.mermaidSource;
+            el.removeAttribute('data-processed');
+          }
+        });
+        renderMermaid();
+      }, 0);
+    });
+  }
+
+  // Cache the original source once so theme toggles can re-render.
+  document.querySelectorAll<HTMLElement>('pre.mermaid').forEach((el) => {
+    if (!el.dataset.mermaidSource) {
+      el.dataset.mermaidSource = el.textContent ?? '';
+    }
+  });
+</script>
+
+<style is:global>
+  pre.mermaid {
+    background: transparent;
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.5rem;
+    padding: 1rem;
+    display: flex;
+    justify-content: center;
+    overflow-x: auto;
+  }
+  pre.mermaid svg {
+    max-width: 100%;
+    height: auto;
+  }
+</style>

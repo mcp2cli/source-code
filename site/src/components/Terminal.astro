@@ -1,6 +1,8 @@
 ---
-// A static terminal block — no animation, no JS. Renders an install +
-// typical-usage flow with muted-tone prompts and output lines.
+// A static terminal block — no animation, no JS. Builds the inner HTML
+// as a single string so whitespace inside <pre> stays predictable
+// (Astro's JSX-like templates preserve template indentation verbatim
+// inside <pre>, which broke the earlier map-based implementation).
 
 type Line =
   | { kind: 'prompt'; text: string; comment?: string }
@@ -31,6 +33,27 @@ const lines: Line[] = [
   },
   { kind: 'output', text: '✓ queued (delivery_id: a4f2…)' },
 ];
+
+const escape = (s: string) =>
+  s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const html = lines
+  .map((line) => {
+    if (line.kind === 'blank') return '';
+    if (line.kind === 'output') {
+      return `<span class="text-muted-foreground">${escape(line.text)}</span>`;
+    }
+    const body = `<span class="text-muted-foreground">$ </span><span class="text-foreground">${escape(line.text)}</span>`;
+    const comment = line.comment
+      ? `  <span class="text-muted-foreground">${escape(line.comment)}</span>`
+      : '';
+    return `${body}${comment}`;
+  })
+  .join('\n');
 ---
 
 <div class="overflow-hidden rounded-lg border border-border bg-subtle shadow-sm">
@@ -45,20 +68,5 @@ const lines: Line[] = [
     <div class="font-mono">~/projects/work</div>
     <div class="w-12"></div>
   </div>
-
-  <pre class="overflow-x-auto px-4 py-4 font-mono text-[13px] leading-6"><code>{
-      lines.map((line) => {
-        if (line.kind === 'blank') return '\n';
-        if (line.kind === 'output') {
-          return (<span class="block text-muted-foreground">{line.text}</span>);
-        }
-        return (
-          <span class="block">
-            <span class="text-muted-foreground">$ </span>
-            <span class="text-foreground">{line.text}</span>
-            {line.comment ? <span class="text-muted-foreground">{'  ' + line.comment}</span> : null}
-          </span>
-        );
-      })
-    }</code></pre>
+  <pre class="overflow-x-auto px-4 py-4 font-mono text-[13px] leading-6"><code set:html={html} /></pre>
 </div>
