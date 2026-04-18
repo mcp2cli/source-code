@@ -617,15 +617,28 @@ export default function InteractiveTerminal() {
   // AnimatedRun child types (child owns its own state), so a plain
   // useEffect-on-render never fires mid-animation and the terminal
   // stops scrolling once content overflows the 420px viewport.
+  //
+  // Smoothness: we only actually scroll when the content's *height*
+  // grew (ignore width jitter as characters slot in), and we use a
+  // short CSS-driven eased animation via scrollTo({ behavior }) so
+  // the viewport glides into position instead of snapping.
   useEffect(() => {
     const scroll = scrollRef.current;
     const content = contentRef.current;
     if (!scroll || !content) return;
-    const pin = () => {
-      scroll.scrollTop = scroll.scrollHeight;
+    let lastHeight = content.scrollHeight;
+    const pin = (behavior: ScrollBehavior = 'smooth') => {
+      scroll.scrollTo({ top: scroll.scrollHeight, behavior });
     };
-    pin();
-    const ro = new ResizeObserver(pin);
+    pin('instant' as ScrollBehavior);
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      const h = content.scrollHeight;
+      if (h === lastHeight) return;
+      lastHeight = h;
+      pin('smooth');
+    });
     ro.observe(content);
     return () => ro.disconnect();
   }, []);
