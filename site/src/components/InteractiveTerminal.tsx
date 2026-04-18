@@ -140,23 +140,30 @@ type Tok = { text: string; cls: string | null };
 const URL_RE = /^(?:https?:\/\/|file:\/\/|\.?\.?\/|~\/)[\w\-./%?&=#:{}@~]*$/i;
 const FLAG_RE = /^--?[A-Za-z][\w-]*/;
 const STRING_RE = /^["'].*["']$/;
+const OP_RE = /^(?:\||\|\||&&|;|>>|>|<<|<)$/;
 
 function tokenizeShell(text: string): Tok[] {
   const out: Tok[] = [];
-  // Split preserving whitespace runs; newlines + any space.
   const parts = text.split(/(\s+)/);
-  let sawFirstWord = false;
+  let expectCommand = true; // next non-whitespace token is the command
   for (const part of parts) {
     if (part === '') continue;
     if (/^\s+$/.test(part)) {
-      if (/\n/.test(part)) sawFirstWord = false; // next logical line
+      if (/\n/.test(part)) expectCommand = true;
       out.push({ text: part, cls: null });
       continue;
     }
-    if (!sawFirstWord) {
-      sawFirstWord = true;
+    // Shell operators — after one of these, the next token is a
+    // new command (`cmd1 | cmd2`, `cmd1 && cmd2`, etc.).
+    if (OP_RE.test(part)) {
+      out.push({ text: part, cls: 'tok-op' });
+      expectCommand = true;
+      continue;
+    }
+    if (expectCommand) {
+      expectCommand = false;
       // A continuation line may start with a flag — let the flag
-      // matcher re-classify below if so.
+      // matcher re-classify it.
       if (FLAG_RE.test(part)) {
         out.push({ text: part, cls: 'tok-flag' });
       } else {
@@ -187,6 +194,8 @@ function tokenClass(cls: string | null): string {
       return 'text-[color:var(--tok-str)]';
     case 'tok-url':
       return 'text-[color:var(--tok-url)]';
+    case 'tok-op':
+      return 'text-[color:var(--tok-op)]';
     default:
       return TEXT_FG;
   }

@@ -24,13 +24,16 @@
     --code-ok: #22863a;
 
     /* zsh-style accent tokens used by the interactive terminal.
-       Mirror the github-light palette so a command rendered inline in
-       the demo looks the same as one inside a markdown fence. */
-    --tok-cmd: #6f42c1;    /* function / command name — purple */
-    --tok-flag: #d73a49;   /* option / flag           — red    */
-    --tok-str: #032f62;    /* quoted string           — navy   */
-    --tok-url: #005cc5;    /* url / path              — blue   */
-    --tok-com: #6a737d;    /* comment                 — grey   */
+       Colours lifted straight from what Shiki's github-light theme
+       emits for each bash scope — so a command rendered inline in
+       the demo looks exactly the same as one inside a markdown
+       fence. Any change here should mirror a Shiki inspection. */
+    --tok-cmd: #6f42c1;    /* function / command name   — purple */
+    --tok-flag: #005cc5;   /* option (--foo, -x)        — blue   */
+    --tok-str: #032f62;    /* quoted string             — navy   */
+    --tok-url: #032f62;    /* url / path (shell string) — navy   */
+    --tok-op: #bf3441;     /* pipe / redirect operators — red    */
+    --tok-com: #6a737d;    /* comment                   — grey   */
   }
 
   .dark {
@@ -50,11 +53,12 @@
     --code-ok: #4ade80;
 
     /* Match the vesper dark-theme palette for the interactive demo. */
-    --tok-cmd: #ffc799;    /* function / command name — peach  */
-    --tok-flag: #a0a0a0;   /* option / flag           — grey   */
-    --tok-str: #99ffe4;    /* quoted string           — cyan   */
-    --tok-url: #99ffe4;    /* url / path              — cyan   */
-    --tok-com: #7a7a7a;    /* comment                 — grey   */
+    --tok-cmd: #ffc799;    /* function / command name   — peach */
+    --tok-flag: #99ffe4;   /* option (--foo, -x)        — cyan  */
+    --tok-str: #99ffe4;    /* quoted string             — cyan  */
+    --tok-url: #99ffe4;    /* url / path (shell string) — cyan  */
+    --tok-op: #a0a0a0;     /* pipe / redirect operators — grey  */
+    --tok-com: #7a7a7a;    /* comment                   — grey  */
   }
 
   * {
