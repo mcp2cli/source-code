@@ -85,6 +85,14 @@
     color: hsl(var(--background));
   }
 
+  /* Keep anchor-link targets out from under the 56px sticky header
+     (plus a bit of breathing room). Applies to every heading — the
+     rehype-generated IDs on docs-page h2/h3 are the primary
+     beneficiaries, but landing-section headings also benefit. */
+  :where(h1, h2, h3, h4, h5, h6)[id] {
+    scroll-margin-top: 5rem;
+  }
+
   code {
     font-variant-ligatures: none;
   }
