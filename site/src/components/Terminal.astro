@@ -41,12 +41,15 @@ const escape = (s: string) =>
     .replace(/"/g, '&quot;');
 
 // Palette pinned here so the terminal stays dark even in light-mode.
-// Matches the zsh default palette: muted prompt, white command, grey output.
+// Colours are lifted straight from the `github-dark-dimmed` Shiki
+// theme that Expressive Code uses for dark-mode code fences, so
+// commands read identically whether they appear in this terminal
+// mockup or in a rendered code block.
 const C = {
-  prompt: '#7a7f87',   // prompt "$"
-  command: '#e6e6e6',  // typed command
-  comment: '#6a717a',  // trailing comment
-  output: '#a8adb4',   // server / tool output
+  prompt: '#768390',   // comment tone — muted, matches `#` in code
+  command: '#adbac7',  // default foreground in github-dark-dimmed
+  comment: '#768390',  // comment tone
+  output: '#8c959f',   // slightly lighter than comment for legibility
 };
 
 const html = lines

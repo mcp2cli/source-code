@@ -8,9 +8,8 @@ import { Code } from 'astro-expressive-code/components';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const href = (p: string) => `${base}${p}`;
 
-const installCmd = `git clone https://github.com/mcp2cli/source-code.git
-cd source-code
-cargo install --path .`;
+const oneLinerCmd = `curl -fsSL https://mcp2cli.dev/install.sh | sh`;
+const cargoCmd = `cargo install --git https://github.com/mcp2cli/source-code`;
 ---
 
 <BaseLayout>
@@ -51,12 +50,18 @@ cargo install --path .`;
 
   <section class="border-b border-border">
     <div class="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
-      <div class="flex flex-col items-start gap-4">
+      <div class="flex flex-col items-start gap-5">
         <div class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
           Install
         </div>
         <div class="w-full">
-          <Code code={installCmd} lang="bash" />
+          <Code code={oneLinerCmd} lang="bash" />
+        </div>
+        <div class="w-full">
+          <div class="mb-2 text-xs text-muted-foreground">
+            Or with <code class="rounded border border-border bg-subtle px-1.5 py-0.5 font-mono text-[11px]">cargo</code> directly:
+          </div>
+          <Code code={cargoCmd} lang="bash" />
         </div>
         <a
           href={href('/docs/files/install')}

@@ -1,15 +1,17 @@
 import { defineEcConfig } from 'astro-expressive-code';
 
-// Single dark theme for every code block, regardless of the site's
-// light/dark mode — gives every code fence a terminal look (black
-// background, grey chrome) and keeps long commands readable against
-// the neutral page palette.
+// Dual-theme code blocks: github-light in light mode, github-dark-dimmed
+// in dark mode. Backgrounds and chrome flow through CSS variables
+// defined in globals.css (--code-bg / --code-chrome / --code-hairline)
+// so both modes stay subtle against the page rather than shouting.
 export default defineEcConfig({
-  themes: ['github-dark-dimmed'],
+  themes: ['github-light', 'github-dark-dimmed'],
+  themeCssSelector: (theme) =>
+    theme.name === 'github-dark-dimmed' ? 'html.dark' : 'html:not(.dark)',
   styleOverrides: {
     borderRadius: '0.5rem',
-    borderColor: '#1f1f1f',
-    codeBackground: '#0a0a0a',
+    borderColor: 'var(--code-hairline)',
+    codeBackground: 'var(--code-bg)',
     codeFontFamily:
       'ui-monospace, SFMono-Regular, Menlo, Monaco, "JetBrains Mono", monospace',
     codeFontSize: '0.85rem',
@@ -17,15 +19,15 @@ export default defineEcConfig({
       'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif',
     frames: {
       shadowColor: 'transparent',
-      editorBackground: '#0a0a0a',
-      terminalBackground: '#0a0a0a',
-      editorTabBarBackground: '#141414',
-      terminalTitlebarBackground: '#141414',
-      terminalTitlebarBorderBottomColor: '#1f1f1f',
-      editorTabBarBorderBottomColor: '#1f1f1f',
+      editorBackground: 'var(--code-bg)',
+      terminalBackground: 'var(--code-bg)',
+      editorTabBarBackground: 'var(--code-chrome)',
+      terminalTitlebarBackground: 'var(--code-chrome)',
+      terminalTitlebarBorderBottomColor: 'var(--code-hairline)',
+      editorTabBarBorderBottomColor: 'var(--code-hairline)',
       editorActiveTabIndicatorTopColor: 'transparent',
-      editorActiveTabBackground: '#0a0a0a',
-      tooltipSuccessBackground: '#141414',
+      editorActiveTabBackground: 'var(--code-bg)',
+      tooltipSuccessBackground: 'var(--code-chrome)',
     },
   },
   defaultProps: {
