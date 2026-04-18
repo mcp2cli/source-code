@@ -415,8 +415,102 @@ function AnimatedRun({
 }
 
 // -------------------------------------------------------------
-// Wizard menu with keyboard navigation.
+// Wizard menu. The same markup is used for both the active menu
+// (interactive; key/mouse input) and its frozen scrollback twin
+// (read-only, with the picked option highlighted). Sharing the
+// component keeps the two variants pixel-identical so the
+// transition from "live menu" → "decision recorded" feels like the
+// menu simply stopped accepting input — no layout jump.
 // -------------------------------------------------------------
+
+type WizardOptionsProps = {
+  question: string;
+  options: WizardOption[];
+  selected: number;
+  onSelect?: (idx: number) => void;
+  onPick?: (option: WizardOption) => void;
+  pickedId?: string; // when set, menu is read-only and shows the pick
+  footer?: React.ReactNode;
+};
+
+function WizardBody({
+  question,
+  options,
+  selected,
+  onSelect,
+  onPick,
+  pickedId,
+  footer,
+}: WizardOptionsProps) {
+  const pickedIdx = pickedId ? options.findIndex((o) => o.id === pickedId) : -1;
+  return (
+    <>
+      <div className={`mb-2 ${TEXT_FG}`}>{question}</div>
+      <ul className="space-y-0.5">
+        {options.map((opt, i) => {
+          const highlight =
+            pickedIdx >= 0 ? i === pickedIdx : i === selected;
+          const clickable = pickedIdx < 0 && onPick;
+          const Row = (
+            <div
+              className={`flex w-full items-baseline gap-2 rounded px-2 py-1 text-left ${
+                highlight
+                  ? `${TITLEBAR_BG} ${TEXT_FG}`
+                  : `${TEXT_MUTED}`
+              } ${clickable ? 'cursor-pointer transition hover:text-[color:var(--code-fg)]' : ''}`}
+            >
+              <span
+                aria-hidden="true"
+                className={`w-3 text-center ${highlight ? TEXT_OK : 'text-transparent'}`}
+              >
+                ▸
+              </span>
+              <span className="font-medium">{opt.label}</span>
+              {opt.hint ? <span className={TEXT_MUTED}>— {opt.hint}</span> : null}
+            </div>
+          );
+          if (!clickable) {
+            return <li key={opt.id}>{Row}</li>;
+          }
+          return (
+            <li key={opt.id}>
+              <button
+                type="button"
+                onMouseEnter={() => onSelect?.(i)}
+                onClick={() => onPick?.(opt)}
+                className="block w-full text-left"
+              >
+                {Row}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {footer}
+    </>
+  );
+}
+
+function StaticWizard({
+  question,
+  options,
+  pickedId,
+}: {
+  question: string;
+  options: WizardOption[];
+  pickedId: string;
+}) {
+  return (
+    <div className="mb-3">
+      <WizardBody
+        question={question}
+        options={options}
+        selected={-1}
+        pickedId={pickedId}
+      />
+    </div>
+  );
+}
 
 function Wizard({
   question,
@@ -466,40 +560,20 @@ function Wizard({
       ref={containerRef}
       tabIndex={0}
       onKeyDown={handleKey}
-      className={`mt-3 rounded border ${BORDER} ${BODY_BG} p-3 outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--code-fg-muted)]`}
+      className="mb-3 outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--code-fg-muted)] rounded"
     >
-      <div className={`mb-2 ${TEXT_FG}`}>{question}</div>
-      <ul className="space-y-0.5">
-        {options.map((opt, i) => {
-          const active = i === selected;
-          return (
-            <li key={opt.id}>
-              <button
-                type="button"
-                onMouseEnter={() => setSelected(i)}
-                onClick={() => onPick(opt)}
-                className={`flex w-full items-baseline gap-2 rounded px-2 py-1 text-left transition ${
-                  active
-                    ? `${TITLEBAR_BG} ${TEXT_FG}`
-                    : `${TEXT_MUTED} hover:${TEXT_FG}`
-                }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`w-3 text-center ${active ? TEXT_OK : 'text-transparent'}`}
-                >
-                  ▸
-                </span>
-                <span className="font-medium">{opt.label}</span>
-                {opt.hint ? <span className={TEXT_MUTED}>— {opt.hint}</span> : null}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      <div className={`mt-3 text-[11px] ${TEXT_MUTED} opacity-80`}>
-        ↑↓ select · Enter to run · 1–{options.length} shortcut
-      </div>
+      <WizardBody
+        question={question}
+        options={options}
+        selected={selected}
+        onSelect={setSelected}
+        onPick={onPick}
+        footer={
+          <div className={`mt-2 text-[11px] ${TEXT_MUTED} opacity-80`}>
+            ↑↓ select · Enter to run · 1–{options.length} shortcut
+          </div>
+        }
+      />
     </div>
   );
 }
@@ -508,47 +582,66 @@ function Wizard({
 // Top-level component
 // -------------------------------------------------------------
 
+type HistoryEntry =
+  | { kind: 'run'; id: string; lines: Line[] }
+  | {
+      kind: 'decision';
+      id: string;
+      stepIdx: number;
+      question: string;
+      options: WizardOption[];
+      pickedId: string;
+    };
+
 type Phase =
   | { kind: 'running'; run: Run; stepIdx: number }
   | { kind: 'wizard'; stepIdx: number }
   | { kind: 'done' };
 
 export default function InteractiveTerminal() {
-  const [history, setHistory] = useState<Run[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [phase, setPhase] = useState<Phase>(() =>
     SCRIPT[0].kind === 'commands'
       ? { kind: 'running', run: { id: 'intro', lines: (SCRIPT[0] as { lines: Line[] }).lines }, stepIdx: 0 }
       : { kind: 'wizard', stepIdx: 0 },
   );
   const [runToken, setRunToken] = useState(0);
+  const [wizardToken, setWizardToken] = useState(0);
   const [skip, setSkip] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Auto-scroll the terminal body to the bottom as new lines arrive
+  // or a fresh wizard is appended. Only pins when the user is already
+  // near the bottom; leaves them alone if they've scrolled up to read
+  // earlier output.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 120) {
+      el.scrollTop = el.scrollHeight;
+    }
   });
 
   const advanceFromRun = useCallback(() => {
-    const next = SCRIPT[(phase as { stepIdx: number }).stepIdx + 1];
+    if (phase.kind !== 'running') return;
+    const next = SCRIPT[phase.stepIdx + 1];
+    setHistory((h) => [
+      ...h,
+      { kind: 'run', id: phase.run.id, lines: phase.run.lines },
+    ]);
     if (!next) {
-      if (phase.kind === 'running') {
-        setHistory((h) => [...h, phase.run]);
-      }
       setPhase({ kind: 'done' });
       return;
     }
-    if (phase.kind === 'running') {
-      setHistory((h) => [...h, phase.run]);
-    }
     if (next.kind === 'wizard') {
-      setPhase({ kind: 'wizard', stepIdx: (phase as { stepIdx: number }).stepIdx + 1 });
+      setWizardToken((n) => n + 1);
+      setPhase({ kind: 'wizard', stepIdx: phase.stepIdx + 1 });
     } else {
       setPhase({
         kind: 'running',
-        run: { id: `step-${(phase as { stepIdx: number }).stepIdx + 1}`, lines: next.lines },
-        stepIdx: (phase as { stepIdx: number }).stepIdx + 1,
+        run: { id: `step-${phase.stepIdx + 1}-${Date.now()}`, lines: next.lines },
+        stepIdx: phase.stepIdx + 1,
       });
     }
   }, [phase]);
@@ -556,6 +649,23 @@ export default function InteractiveTerminal() {
   const handlePick = useCallback(
     (opt: WizardOption) => {
       if (phase.kind !== 'wizard') return;
+      const wizardStep = SCRIPT[phase.stepIdx];
+      if (!wizardStep || wizardStep.kind !== 'wizard') return;
+      // Freeze the menu into scrollback with the picked option
+      // highlighted so the user sees their choice stay put, then
+      // start the picked run below it.
+      setHistory((h) => [
+        ...h,
+        {
+          kind: 'decision',
+          id: `decision-${phase.stepIdx}-${Date.now()}`,
+          stepIdx: phase.stepIdx,
+          question: wizardStep.question,
+          options: wizardStep.options,
+          pickedId: opt.id,
+        },
+      ]);
+      setSkip(false);
       setRunToken((n) => n + 1);
       setPhase({
         kind: 'running',
@@ -568,9 +678,15 @@ export default function InteractiveTerminal() {
 
   const handleRunDone = useCallback(() => {
     if (phase.kind !== 'running') return;
-    const wizardStep = SCRIPT[phase.stepIdx];
-    if (wizardStep && wizardStep.kind === 'wizard') {
-      setHistory((h) => [...h, phase.run]);
+    const currentStep = SCRIPT[phase.stepIdx];
+    if (currentStep && currentStep.kind === 'wizard') {
+      // Command picked from the wizard finished — scroll it into
+      // history and present a fresh menu below for the next pick.
+      setHistory((h) => [
+        ...h,
+        { kind: 'run', id: phase.run.id, lines: phase.run.lines },
+      ]);
+      setWizardToken((n) => n + 1);
       setPhase({ kind: 'wizard', stepIdx: phase.stepIdx });
     } else {
       advanceFromRun();
@@ -581,6 +697,7 @@ export default function InteractiveTerminal() {
     setHistory([]);
     setSkip(false);
     setRunToken((n) => n + 1);
+    setWizardToken((n) => n + 1);
     const first = SCRIPT[0];
     if (first.kind === 'commands') {
       setPhase({
@@ -633,11 +750,20 @@ export default function InteractiveTerminal() {
         onClick={handleBodyClick}
         className={`h-[420px] overflow-y-auto overflow-x-auto px-4 py-4 font-mono text-[13px] leading-[1.55] ${TEXT_FG}`}
       >
-        {history.map((run) => (
-          <div key={run.id} className="mb-3">
-            <StaticLines lines={run.lines} />
-          </div>
-        ))}
+        {history.map((entry) =>
+          entry.kind === 'run' ? (
+            <div key={entry.id} className="mb-3">
+              <StaticLines lines={entry.lines} />
+            </div>
+          ) : (
+            <StaticWizard
+              key={entry.id}
+              question={entry.question}
+              options={entry.options}
+              pickedId={entry.pickedId}
+            />
+          ),
+        )}
 
         {phase.kind === 'running' ? (
           <AnimatedRun
@@ -650,10 +776,11 @@ export default function InteractiveTerminal() {
 
         {phase.kind === 'wizard' ? (
           <Wizard
+            key={wizardToken}
             question={(SCRIPT[phase.stepIdx] as { question: string }).question}
             options={(SCRIPT[phase.stepIdx] as { options: WizardOption[] }).options}
             onPick={handlePick}
-            autoFocus={history.length > 0}
+            autoFocus={history.some((h) => h.kind === 'decision')}
           />
         ) : null}
       </div>
