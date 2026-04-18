@@ -1,17 +1,17 @@
 import { defineEcConfig } from 'astro-expressive-code';
 
-// Dual-theme code blocks: github-light in light mode, vitesse-black
-// in dark mode. `vitesse-black` has a near-white foreground
-// (#dbd7ca) with a restrained, muted accent palette — matches the
-// site's minimal black/white/grey aesthetic and reads bright against
-// the pinned #0a0a0a background.
+// Dual-theme code blocks: github-light in light mode, vesper in dark
+// mode. `vesper` is Rauno's minimalist theme — near-pure-white
+// foreground with highly restrained accents (soft cyan, muted orange,
+// grey keywords). Text reads almost entirely white against the pinned
+// #0a0a0a background, matching the site's minimal aesthetic.
 // Backgrounds and chrome flow through CSS variables defined in
 // globals.css (--code-bg / --code-chrome / --code-hairline) so both
 // modes stay subtle against the page rather than shouting.
 export default defineEcConfig({
-  themes: ['github-light', 'vitesse-black'],
+  themes: ['github-light', 'vesper'],
   themeCssSelector: (theme) =>
-    theme.name === 'vitesse-black' ? 'html.dark' : 'html:not(.dark)',
+    theme.name === 'vesper' ? 'html.dark' : 'html:not(.dark)',
   styleOverrides: {
     borderRadius: '0.5rem',
     borderColor: 'var(--code-hairline)',

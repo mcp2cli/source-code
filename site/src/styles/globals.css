@@ -13,11 +13,12 @@
     --ring: 0 0% 20%;
     --radius: 0.5rem;
 
-    /* Expressive-code surface tokens. Kept subtle on light mode so
-       code blocks don't shout against a white page. */
-    --code-bg: #f5f5f5;
-    --code-chrome: #ececec;
-    --code-hairline: hsl(0 0% 88%);
+    /* Expressive-code surface tokens. A subtle cool slate tint so
+       code blocks read as a distinct surface rather than blending
+       into the neutral grey palette of the rest of the page. */
+    --code-bg: #eef2f7;
+    --code-chrome: #e1e7ef;
+    --code-hairline: #d6dde6;
   }
 
   .dark {
