@@ -10,8 +10,11 @@ import { defineEcConfig } from 'astro-expressive-code';
 // the React demo can colour its own command lines to match.
 export default defineEcConfig({
   themes: ['github-light', 'vesper'],
-  themeCssSelector: (theme) =>
-    theme.name === 'vesper' ? 'html.dark' : 'html:not(.dark)',
+  // Use EC's default attribute-based theme selection — it emits
+  // `[data-theme="github-light"]` / `[data-theme="vesper"]` which
+  // are clean, mutually-exclusive selectors. BaseLayout.astro keeps
+  // `<html>`'s data-theme in sync with `.dark` class for Tailwind.
+  themeCssSelector: (theme) => `[data-theme="${theme.name}"]`,
   styleOverrides: {
     borderRadius: '0.5rem',
     borderColor: 'var(--code-hairline)',

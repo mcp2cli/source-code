@@ -46,15 +46,25 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
 
     <script is:inline>
       (() => {
+        const root = document.documentElement;
+        const apply = (mode) => {
+          // Keep the `.dark` class for Tailwind's darkMode and the
+          // `data-theme` attribute for expressive-code's theme
+          // selectors aligned. Both read from the same source of
+          // truth (`theme` in localStorage).
+          if (mode === 'dark') {
+            root.classList.add('dark');
+            root.setAttribute('data-theme', 'vesper');
+          } else {
+            root.classList.remove('dark');
+            root.setAttribute('data-theme', 'github-light');
+          }
+        };
         try {
           const stored = localStorage.getItem('theme');
-          // Dark by default — only fall back to light if the user has
-          // explicitly opted into it via the theme toggle.
-          if (stored !== 'light') {
-            document.documentElement.classList.add('dark');
-          }
+          apply(stored === 'light' ? 'light' : 'dark');
         } catch {
-          document.documentElement.classList.add('dark');
+          apply('dark');
         }
       })();
     </script>

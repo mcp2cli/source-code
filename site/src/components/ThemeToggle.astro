@@ -45,7 +45,11 @@
     if (!btn) return;
     btn.addEventListener('click', () => {
       const html = document.documentElement;
-      const next = html.classList.toggle('dark') ? 'dark' : 'light';
+      const isDark = html.classList.toggle('dark');
+      const next = isDark ? 'dark' : 'light';
+      // Keep data-theme aligned with .dark so expressive-code's
+      // code-block selectors track the Tailwind theme toggle.
+      html.setAttribute('data-theme', isDark ? 'vesper' : 'github-light');
       try {
         localStorage.setItem('theme', next);
       } catch {}
