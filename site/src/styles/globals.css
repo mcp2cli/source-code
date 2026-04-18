@@ -48,17 +48,20 @@
     --code-bg: #0a0a0a;
     --code-chrome: #141414;
     --code-hairline: #1f1f1f;
-    --code-fg: #ffffff;
-    --code-fg-muted: #7a7a7a;
-    --code-ok: #4ade80;
+    --code-fg: #abb2bf;
+    --code-fg-muted: #5c6370;
+    --code-ok: #98c379;
 
-    /* Match the vesper dark-theme palette for the interactive demo. */
-    --tok-cmd: #ffc799;    /* function / command name   — peach */
-    --tok-flag: #99ffe4;   /* option (--foo, -x)        — cyan  */
-    --tok-str: #99ffe4;    /* quoted string             — cyan  */
-    --tok-url: #99ffe4;    /* url / path (shell string) — cyan  */
-    --tok-op: #a0a0a0;     /* pipe / redirect operators — grey  */
-    --tok-com: #8b8b8b;    /* comment                   — grey  */
+    /* Match the one-dark-pro palette Shiki emits for bash so the
+       interactive terminal reads like a VS Code One Dark session —
+       blue commands, orange flags, green strings/paths, subtle grey
+       operators and comments. */
+    --tok-cmd: #61afef;    /* function / command name — blue    */
+    --tok-flag: #d19a66;   /* option (--foo, -x)      — orange  */
+    --tok-str: #98c379;    /* quoted string           — green   */
+    --tok-url: #98c379;    /* url / path              — green   */
+    --tok-op: #abb2bf;     /* pipe / redirect ops     — grey-fg */
+    --tok-com: #9fa3aa;    /* comment                 — grey    */
   }
 
   * {
