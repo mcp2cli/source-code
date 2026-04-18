@@ -34,28 +34,42 @@ cargo install --path .`;
         <div class="mt-8 flex flex-wrap items-center gap-3">
           <a
             href={href('/docs/getting-started')}
-            class="inline-flex h-10 items-center gap-2 rounded-md border border-foreground bg-foreground px-5 text-sm font-medium text-background transition hover:bg-foreground/90"
+            class="inline-flex h-10 items-center rounded-md border border-foreground bg-foreground px-5 text-sm font-medium text-background transition hover:bg-foreground/90"
           >
-            Get started <span class="font-mono">→</span>
+            Get started
           </a>
           <a
             href={href('/docs/protocol-coverage')}
-            class="inline-flex h-10 items-center rounded-md border border-border bg-background px-5 text-sm font-medium transition hover:bg-muted"
+            class="inline-flex h-10 items-center rounded-md px-3 text-sm text-muted-foreground transition hover:text-foreground"
           >
             Protocol coverage
           </a>
-          <a
-            href="https://github.com/mcp2cli/source-code"
-            class="inline-flex h-10 items-center rounded-md px-3 text-sm text-muted-foreground transition hover:text-foreground"
-          >
-            GitHub
-          </a>
         </div>
       </div>
+    </div>
+  </section>
 
-      <div class="mt-14 sm:mt-20">
-        <Terminal />
+  <section class="border-b border-border">
+    <div class="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+      <div class="flex flex-col items-start gap-4">
+        <div class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          Install
+        </div>
+        <div class="w-full">
+          <Code code={installCmd} lang="bash" />
+        </div>
+        <a
+          href={href('/docs/files/install')}
+          class="text-sm text-muted-foreground underline decoration-muted-foreground underline-offset-4 transition hover:text-foreground hover:decoration-foreground"
+          >Full install guide →</a
+        >
       </div>
+    </div>
+  </section>
+
+  <section class="border-b border-border">
+    <div class="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+      <Terminal />
     </div>
   </section>
 
@@ -97,22 +111,4 @@ cargo install --path .`;
 
   <FeatureGrid />
   <ProtocolPeek />
-
-  <section class="border-t border-border">
-    <div class="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-      <div class="flex flex-col items-start gap-4">
-        <div class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          Install
-        </div>
-        <div class="w-full">
-          <Code code={installCmd} lang="bash" />
-        </div>
-        <a
-          href={href('/docs/files/INSTALL')}
-          class="text-sm text-muted-foreground underline decoration-muted-foreground underline-offset-4 transition hover:text-foreground hover:decoration-foreground"
-          >Full install guide →</a
-        >
-      </div>
-    </div>
-  </section>
 </BaseLayout>

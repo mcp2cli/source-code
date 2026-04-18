@@ -1,8 +1,7 @@
 ---
-// A static terminal block — no animation, no JS. Builds the inner HTML
-// as a single string so whitespace inside <pre> stays predictable
-// (Astro's JSX-like templates preserve template indentation verbatim
-// inside <pre>, which broke the earlier map-based implementation).
+// A static terminal block — always dark (zsh-style), regardless of
+// the site's light/dark mode. Renders the inner HTML as a single
+// escaped string so whitespace inside <pre> stays predictable.
 
 type Line =
   | { kind: 'prompt'; text: string; comment?: string }
@@ -41,32 +40,42 @@ const escape = (s: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
+// Palette pinned here so the terminal stays dark even in light-mode.
+// Matches the zsh default palette: muted prompt, white command, grey output.
+const C = {
+  prompt: '#7a7f87',   // prompt "$"
+  command: '#e6e6e6',  // typed command
+  comment: '#6a717a',  // trailing comment
+  output: '#a8adb4',   // server / tool output
+};
+
 const html = lines
   .map((line) => {
     if (line.kind === 'blank') return '';
     if (line.kind === 'output') {
-      return `<span class="text-muted-foreground">${escape(line.text)}</span>`;
+      return `<span style="color:${C.output}">${escape(line.text)}</span>`;
     }
-    const body = `<span class="text-muted-foreground">$ </span><span class="text-foreground">${escape(line.text)}</span>`;
+    const body = `<span style="color:${C.prompt}">$ </span><span style="color:${C.command}">${escape(line.text)}</span>`;
     const comment = line.comment
-      ? `  <span class="text-muted-foreground">${escape(line.comment)}</span>`
+      ? `  <span style="color:${C.comment}">${escape(line.comment)}</span>`
       : '';
     return `${body}${comment}`;
   })
   .join('\n');
 ---
 
-<div class="overflow-hidden rounded-lg border border-border bg-subtle shadow-sm">
+<div class="overflow-hidden rounded-lg border border-zinc-800 bg-[#0a0a0a] shadow-xl">
   <div
-    class="flex items-center justify-between border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground"
+    class="flex items-center justify-between border-b border-zinc-800 bg-[#141414] px-4 py-2 text-xs text-zinc-500"
   >
     <div class="flex items-center gap-1.5">
-      <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
-      <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
-      <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
+      <span class="h-2.5 w-2.5 rounded-full bg-zinc-700"></span>
+      <span class="h-2.5 w-2.5 rounded-full bg-zinc-700"></span>
+      <span class="h-2.5 w-2.5 rounded-full bg-zinc-700"></span>
     </div>
     <div class="font-mono">~/projects/work</div>
     <div class="w-12"></div>
   </div>
-  <pre class="overflow-x-auto px-4 py-4 font-mono text-[13px] leading-6"><code set:html={html} /></pre>
+  <pre
+    class="overflow-x-auto px-4 py-4 font-mono text-[13px] leading-6 text-zinc-200"><code set:html={html} /></pre>
 </div>
