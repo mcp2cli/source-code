@@ -18,12 +18,59 @@ For integration tests a Node.js runtime (≥18) is recommended to run the
 
 ---
 
-## Install from Source (recommended)
+## One-command install (recommended)
+
+The fastest path — one line, works on any POSIX shell:
+
+```bash
+curl -fsSL https://mcp2cli.dev/install.sh | sh
+```
+
+Or with `wget`:
+
+```bash
+wget -qO- https://mcp2cli.dev/install.sh | sh
+```
+
+The script is served straight from the mcp2cli.dev site
+(`site/public/install.sh` in this repo, if you want to read it
+before piping it to your shell — always a good habit). It:
+
+1. Checks for a `cargo` toolchain and points you at rustup if
+   missing.
+2. Warns if `$CARGO_HOME/bin` (default `~/.cargo/bin`) is not on
+   your `PATH`.
+3. Runs `cargo install --git https://github.com/mcp2cli/source-code --locked`
+   so the build is reproducible against the latest main.
+4. Confirms the install location and suggests `mcp2cli --help`.
+
+### Inspect first, then run
+
+If you'd rather read the script before executing it:
+
+```bash
+curl -fsSL https://mcp2cli.dev/install.sh -o install-mcp2cli.sh
+less install-mcp2cli.sh         # inspect
+sh install-mcp2cli.sh           # run when satisfied
+rm  install-mcp2cli.sh
+```
+
+### Verify
+
+```bash
+mcp2cli --version
+```
+
+---
+
+## Install from source (manual)
+
+Prefer to do it by hand, or need to build from a local checkout?
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/mcp2cli/source-code.git
-cd mcp2cli
+cd source-code
 
 # 2. Build and install
 cargo install --path .
@@ -31,6 +78,13 @@ cargo install --path .
 # The binary is placed at ~/.cargo/bin/mcp2cli
 # Ensure ~/.cargo/bin is on your PATH:
 export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+You can also skip the clone step entirely and install straight from
+GitHub:
+
+```bash
+cargo install --git https://github.com/mcp2cli/source-code --locked
 ```
 
 ### Verify
@@ -174,12 +228,29 @@ export MCP2CLI_BIN_DIR=/custom/bin
 
 ## Updating
 
+Re-run the installer — it always pulls the latest main:
+
+```bash
+curl -fsSL https://mcp2cli.dev/install.sh | sh
+```
+
+Or with `cargo` directly:
+
+```bash
+cargo install --git https://github.com/mcp2cli/source-code --locked --force
+```
+
+Or, if you installed from a local clone:
+
 ```bash
 cd path/to/mcp2cli-repo
 git pull
 cargo install --path . --force
+```
 
-# Refresh man pages after update
+Refresh man pages after any update:
+
+```bash
 mcp2cli man install
 ```
 
