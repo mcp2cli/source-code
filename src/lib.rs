@@ -1,0 +1,11 @@
+pub mod app;
+pub mod apps;
+pub mod cli;
+pub mod config;
+pub mod dispatch;
+pub mod man;
+pub mod mcp;
+pub mod observability;
+pub mod output;
+pub mod runtime;
+pub mod telemetry;

@@ -1,0 +1,133 @@
+# mcp2cli
+
+> Turn any MCP server into a native command-line application.
+
+mcp2cli is a universal CLI bridge for MCP (Model Context Protocol) servers.
+It auto-discovers server capabilities and maps them to typed terminal commands.
+Tools become verbs. Resources become nouns. Prompts become workflows.
+
+- Source: https://github.com/mcp2cli/source-code
+- Docs: https://github.com/mcp2cli/source-code/tree/main/docs
+- License: See LICENSE.md
+
+## Quick start
+
+```bash
+# Ad-hoc (zero config)
+mcp2cli --url http://127.0.0.1:3001/mcp ls
+mcp2cli --url http://127.0.0.1:3001/mcp echo --message hello
+mcp2cli --stdio "npx @modelcontextprotocol/server-everything" ls
+
+# Named config + alias
+mcp2cli config init --name work --transport streamable_http --endpoint http://127.0.0.1:3001/mcp
+mcp2cli link create --name work
+work ls
+work echo --message hello
+work doctor
+```
+
+## Installation
+
+```bash
+cargo install --path .
+mcp2cli man install          # install man page
+```
+
+Full install guide: [docs/files/INSTALL.md](INSTALL.md)
+
+## Key capabilities
+
+- Discovery-driven dynamic CLI — JSON Schema → typed `--flags`
+- Named configs + symlink aliases (`work`, `prod`, `staging`)
+- Ad-hoc mode (`--url`, `--stdio`) — zero config
+- Profile overlays — rename, hide, group commands
+- Background jobs (`--background`, `jobs watch`)
+- Full `--json` / `--output ndjson` output on every command
+- OAuth authentication (`auth login/logout/status`)
+- 5 event sink types: stderr, HTTP webhook, Unix socket, SSE, command exec
+- Daemon mode — warm sessions between invocations
+- Fuzzy "Did you mean?" suggestions
+- Man pages for `mcp2cli` and every alias
+
+## Transports
+
+- `streamable_http` — JSON-RPC over HTTP with SSE streaming
+- `stdio` — spawn a local subprocess server
+- Demo (offline, `*.invalid` endpoint) — no server needed
+
+## MCP protocol coverage
+
+Full MCP 2025-11-25. Tools, resources, resource templates, prompts, elicitation,
+sampling, background jobs, subscriptions, completions, ping, logging.
+
+## JSON output envelope
+
+```json
+{
+  "app_id": "<alias>",
+  "command": "<command>",
+  "summary": "<one-line>",
+  "lines": ["..."],
+  "data": { ... }
+}
+```
+
+## Host commands (no server needed)
+
+```
+mcp2cli config init --name NAME [--transport ...] [--endpoint URL]
+mcp2cli config list
+mcp2cli config show --name NAME
+mcp2cli link create --name NAME [--dir PATH] [--man-dir PATH] [--no-man]
+mcp2cli use NAME | --show | --clear
+mcp2cli man install [--dir PATH]
+mcp2cli daemon start|stop|status --name NAME
+```
+
+## Runtime commands (server required)
+
+```
+ls [--tools|--resources|--prompts] [--filter PATTERN]
+get URI
+ping
+doctor
+inspect
+jobs list|show|wait|cancel|watch
+auth login|logout|status
+subscribe URI / unsubscribe URI
+log LEVEL
+```
+
+## Environment variables
+
+```
+MCP2CLI_CONFIG_DIR   config directory (default: ~/.config/mcp2cli)
+MCP2CLI_DATA_DIR     data directory (default: ~/.local/share/mcp2cli)
+MCP2CLI_BIN_DIR      symlink directory (default: ~/.local/bin)
+MCP2CLI_CONFIG       explicit config file path
+MCP2CLI_TELEMETRY    set to off/0/false to disable telemetry
+DO_NOT_TRACK=1       standard opt-out signal
+RUST_LOG             tracing filter (e.g. mcp2cli=debug)
+```
+
+## Files
+
+```
+~/.config/mcp2cli/configs/<name>.yaml           named config
+~/.local/share/mcp2cli/host/active-config.json  active config pointer
+~/.local/share/mcp2cli/instances/<name>/        per-config state & tokens
+~/.local/bin/<alias>                            symlink alias
+~/.local/share/man/man1/mcp2cli.1               host man page
+~/.local/share/man/man1/<alias>.1               alias man page
+```
+
+## Optional: docs index
+
+- [Full docs index](../index.md)
+- [Getting started](../getting-started.md)
+- [CLI reference](../reference/cli-reference.md)
+- [Config reference](../reference/config-reference.md)
+- [Usage guide](../usage-guide.md)
+- [AGENTS.md](AGENTS.md)
+- [INSTALL.md](INSTALL.md)
+- [SKILL.md](SKILL.md)

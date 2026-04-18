@@ -1,0 +1,71 @@
+schema_version: 1
+
+app:
+  profile: bridge
+
+server:
+  display_name: Demo MCP Bridge Server
+  transport: streamable_http
+  endpoint: https://demo.invalid/mcp
+  stdio:
+    command: null
+    args: []
+    cwd: null
+    env: {}
+  # Optional: roots to expose via roots/list to the server.
+  # Servers use roots to understand the client's workspace context.
+  # roots:
+  #   - uri: "file:///home/user/project"
+  #     name: "Project Root"
+  #   - uri: "file:///home/user/data"
+
+defaults:
+  output: human                        # human | json | ndjson
+
+logging:
+  level: warn                          # trace | debug | info | warn | error
+  format: pretty                       # pretty | json
+  outputs:
+    - kind: stderr                     # stderr | stdout | file
+
+auth:
+  browser_open_command: null           # Optional command for OAuth browser flows
+
+events:
+  enable_stdio_events: true            # Human-readable events on stderr
+  # http_endpoint: "http://127.0.0.1:9090/events"       # HTTP webhook (POST JSON)
+  # local_socket_path: "/tmp/mcp2cli-events.sock"       # Unix socket (NDJSON)
+  # sse_endpoint: "127.0.0.1:9091"                      # SSE server (text/event-stream)
+  # command: "logger -t mcp2cli '${MCP_EVENT_MESSAGE}'" # Shell command per event
+  # Env vars: MCP_EVENT_TYPE, MCP_EVENT_JSON, MCP_EVENT_APP_ID, MCP_EVENT_MESSAGE
+
+# Anonymous usage telemetry — helps us understand which features are used.
+# No sensitive data is collected (no endpoints, arguments, tool names, or URIs).
+# Disable: set enabled: false, or MCP2CLI_TELEMETRY=off, or --no-telemetry flag.
+# Respects DO_NOT_TRACK env var (https://consoledonottrack.com/).
+telemetry:
+  enabled: true                                        # Master switch (opt-out)
+  # endpoint: "https://telemetry.example.com/v1/events" # Optional HTTP collector
+  # batch_size: 25                                      # Events per HTTP batch
+
+# Optional: customize the dynamic CLI surface.
+# Without this section, server capabilities become CLI commands using their
+# original names and auto-grouped by dotted prefixes.
+#
+# profile:
+#   display_name: "My Custom Tool"       # Shown in --help banner
+#   aliases:                              # Rename commands (top-level or grouped)
+#     long-running-operation: lro
+#     get-tiny-image: image
+#     create.payload: object              # Rename grouped: "create payload" → "create object"
+#   hide:                                 # Hide commands from help/ls
+#     - print-env
+#     - debug-internal
+#   groups:                               # Custom subcommand grouping
+#     debug:
+#       - print-env
+#       - annotated-message
+#   flags:                                # Rename flags per command
+#     echo:
+#       message: msg
+#   resource_verb: get                    # Verb for resource reads (get|fetch|read)

@@ -1,0 +1,651 @@
+# mcp2cli — Full LLM Reference
+
+> Turn any MCP server into a native command-line application.
+> Tools become verbs. Resources become nouns. Prompts become workflows.
+
+- Repository: https://github.com/mcp2cli/source-code
+- Version: 0.1.0
+- Protocol: MCP 2025-11-25
+- License: see LICENSE.md
+
+---
+
+## What mcp2cli Does
+
+mcp2cli is a **discovery-driven CLI bridge** for Model Context Protocol (MCP) servers.
+It requires no MCP protocol knowledge from the user. The server's capabilities are
+auto-discovered and become the CLI:
+
+- Each server **tool** → a subcommand with typed `--flags` from JSON Schema
+- Each server **resource** → accessible via `get <URI>` (concrete) or a parameterised command (template)
+- Each server **prompt** → a subcommand with typed flags from argument metadata
+- Dotted tool names (`email.send`) → nested subcommands (`work email send`)
+
+---
+
+## Installation
+
+```bash
+cargo install --path .
+mcp2cli man install          # install mcp2cli(1) man page
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+```
+
+Full guide: [INSTALL.md](INSTALL.md)
+
+---
+
+## Usage Patterns
+
+### Ad-hoc (zero configuration)
+
+```bash
+# Streamable HTTP server
+mcp2cli --url http://127.0.0.1:3001/mcp ls
+mcp2cli --url http://127.0.0.1:3001/mcp echo --message hello
+mcp2cli --url http://127.0.0.1:3001/mcp get demo://resource/readme.md
+
+# Stdio subprocess server
+mcp2cli --stdio "npx @modelcontextprotocol/server-everything" ls
+mcp2cli --stdio "npx @modelcontextprotocol/server-everything" echo --message hello
+```
+
+### Named config + alias (persistent)
+
+```bash
+# Create config
+mcp2cli config init --name work \
+  --transport streamable_http \
+  --endpoint http://127.0.0.1:3001/mcp
+
+# Create symlink alias + man page
+mcp2cli link create --name work
+# → creates ~/.local/bin/work (symlink) and ~/.local/share/man/man1/work.1
+
+# Use alias as standalone app
+work ls
+work echo --message hello
+work get demo://resource/file.md
+work doctor
+man work
+```
+
+---
+
+## Configuration
+
+### Creating named configs
+
+```bash
+# HTTP transport
+mcp2cli config init --name prod \
+  --transport streamable_http \
+  --endpoint https://prod.api/mcp
+
+# Stdio transport
+mcp2cli config init --name dev \
+  --transport stdio \
+  --stdio-command npx \
+  --stdio-arg @modelcontextprotocol/server-everything
+
+# Multiple server setup
+mcp2cli config init --name staging --transport streamable_http --endpoint https://staging.api/mcp
+mcp2cli link create --name dev
+mcp2cli link create --name staging
+mcp2cli link create --name prod
+```
+
+### Config management
+
+```bash
+mcp2cli config list                     # list all named configs
+mcp2cli config show --name work         # show resolved settings
+mcp2cli use work                        # set active config
+mcp2cli use --show                      # show active config
+mcp2cli use --clear                     # clear active config
+```
+
+### Full config YAML schema
+
+```yaml
+schema_version: 1
+
+app:
+  profile: bridge                        # built-in app profile
+
+server:
+  display_name: My MCP Server
+  transport: streamable_http             # or: stdio
+  endpoint: http://localhost:3001/mcp   # required for streamable_http
+  stdio:
+    command: npx
+    args: ['@modelcontextprotocol/server-everything']
+  roots:
+    - uri: "file:///home/user/project"
+      name: "Project Root"
+
+defaults:
+  output: human                          # human | json | ndjson
+  timeout_seconds: 120                   # 0 = no timeout
+
+logging:
+  level: warn                            # trace | debug | info | warn | error
+  format: pretty                         # pretty | json
+  outputs:
+    - kind: stderr
+
+auth:
+  browser_open_command: null
+
+events:
+  enable_stdio_events: true
+  # http_endpoint: "http://127.0.0.1:9090/events"
+  # local_socket_path: "/tmp/mcp2cli-events.sock"
+  # sse_endpoint: "127.0.0.1:9091"
+  # command: "logger -t mcp2cli '${MCP_EVENT_MESSAGE}'"
+
+profile:
+  display_name: "My Tool"
+  aliases: {}
+  hide: []
+  groups: {}
+  flags: {}
+  resource_verb: get
+
+telemetry:
+  enabled: true                          # set false to disable
+```
+
+---
+
+## CLI — Host Commands (no server required)
+
+### config init
+
+```
+mcp2cli config init
+  --name NAME
+  [--app PROFILE]          default: bridge
+  [--transport KIND]       streamable_http (default) | stdio
+  [--endpoint URL]         required for streamable_http
+  [--stdio-command CMD]    required for stdio
+  [--stdio-arg ARG]...     additional subprocess arguments
+  [--force]                overwrite existing config
+```
+
+### config list / config show
+
+```
+mcp2cli config list
+mcp2cli config show --name NAME
+```
+
+### link create
+
+```
+mcp2cli link create
+  --name NAME
+  [--dir PATH]             symlink directory (default: ~/.local/bin)
+  [--man-dir PATH]         man page directory (default: ~/.local/share/man/man1)
+  [--no-man]               skip man page generation
+  [--force]                overwrite existing symlink
+```
+
+Creates a symlink at `<dir>/<name>` pointing to the mcp2cli binary.
+Also generates and installs a man page for the alias and refreshes mcp2cli(1).
+
+### use
+
+```
+mcp2cli use NAME           set active config
+mcp2cli use --show         show active config
+mcp2cli use --clear        clear active config
+```
+
+### man install
+
+```
+mcp2cli man install [--dir PATH]
+```
+
+Installs (or refreshes) the `mcp2cli(1)` man page.
+Default directory: `~/.local/share/man/man1`.
+
+### daemon
+
+```
+mcp2cli daemon start --name NAME    start warm-session daemon
+mcp2cli daemon stop  --name NAME    stop daemon
+mcp2cli daemon status [--name NAME] show daemon status
+```
+
+---
+
+## CLI — Runtime Commands (server required)
+
+These commands are available through any named alias or active config.
+They connect to the configured MCP server.
+
+### Discovery
+
+```bash
+work ls                          # list all capabilities
+work ls --tools                  # tools only
+work ls --resources              # resources only
+work ls --prompts                # prompts only
+work ls --filter pattern         # filter by name/description
+work ls --limit 10               # paginate
+work ls --cursor TOKEN           # next page
+work ls --all                    # all pages
+```
+
+### Tools (verbs)
+
+```bash
+work TOOL-NAME [--FLAG VALUE]...   # call a tool
+work TOOL-NAME --help              # show tool help
+work TOOL-NAME --background        # run as background job
+work TOOL-NAME --args-file FILE    # load arguments from JSON file
+work TOOL-NAME --args-json JSON    # inline JSON arguments
+work TOOL-NAME --timeout SECS      # per-request timeout override
+```
+
+Dotted names become nested subcommands:
+```bash
+work email send --to user@example.com --body "Hello"
+work email draft create --subject "Test"
+```
+
+### Resources (nouns)
+
+```bash
+work get URI                       # read a concrete resource
+work TEMPLATE-COMMAND [ARGS]       # resource template as command
+```
+
+### Prompts (workflows)
+
+```bash
+work PROMPT-NAME [--FLAG VALUE]... # run a prompt
+```
+
+### Health & diagnostics
+
+```bash
+work ping                          # liveness check with latency
+work doctor                        # connection + capability diagnostics
+work inspect                       # full capability dump
+```
+
+### Background jobs
+
+```bash
+work TOOL --background             # submit as background job
+work jobs list                     # list all jobs
+work jobs show --id ID             # show job details
+work jobs wait --id ID             # wait for completion
+work jobs wait --latest            # wait for most recent job
+work jobs cancel --id ID           # request cancellation
+work jobs cancel --latest          # cancel most recent
+work jobs watch --id ID            # stream live status updates
+work jobs watch --latest           # watch most recent
+```
+
+### Authentication
+
+```bash
+work auth login                    # start OAuth login flow
+work auth logout                   # clear stored tokens
+work auth status                   # show auth state
+```
+
+### Subscriptions & events
+
+```bash
+work subscribe URI                 # subscribe to resource changes
+work unsubscribe URI               # unsubscribe
+work log LEVEL                     # set server log level (debug|info|warn|error)
+work complete REF NAME ARG         # tab-completion from server
+```
+
+---
+
+## JSON Output
+
+All commands support `--json` (or `--output json` / `--output ndjson`).
+Default can be set per config with `defaults.output`.
+
+### Envelope format
+
+```json
+{
+  "app_id": "work",
+  "command": "invoke",
+  "summary": "called echo",
+  "lines": ["Echo: hello world"],
+  "data": {
+    "content": [
+      { "type": "text", "text": "hello world" }
+    ]
+  }
+}
+```
+
+### Common jq pipelines
+
+```bash
+# List all tool names
+work --json ls | jq '[.data.items[] | select(.kind=="tool") | .id]'
+
+# Get text from tool call result
+work --json echo --message hi | jq '.data.content[0].text'
+
+# Health check data
+work --json doctor | jq '.data.server'
+
+# Latest job status
+work --json jobs list | jq '.data.jobs[-1]'
+
+# Discovery: extract id + description
+work --json ls | jq '.data.items[] | {id, summary}'
+```
+
+---
+
+## JSON Schema → CLI Flag Mapping
+
+| JSON Schema | CLI type | Flag format | Example |
+|-------------|----------|-------------|---------|
+| `"type":"string"` | `--flag TEXT` | `--message hello` | `--name Alice` |
+| `"type":"integer"` | `--flag INT` | `--count 5` | `--steps 3` |
+| `"type":"number"` | `--flag NUM` | `--rate 0.7` | `--temperature 1.5` |
+| `"type":"boolean"` | `--flag` (toggle) | `--include-image` | `--verbose` |
+| `"enum":["a","b"]` | `--flag a\|b` | `--level error` | `--mode async` |
+| `"type":"array"` | `--flag VAL,...` | `--tags bug,urgent` | `--ids 1,2,3` |
+| complex / `"$ref"` | `--flag JSON` | `--config '{"k":"v"}'` | `--opts '[]'` |
+
+Required properties become required flags. Optional properties become optional
+flags. Schema defaults are used when a flag is omitted.
+
+---
+
+## Profile Overlays
+
+Per-config CLI surface customization. Add a `profile:` block to the YAML:
+
+```yaml
+profile:
+  display_name: "Email CLI"          # replaces server display name
+
+  aliases:
+    long-tool-name: ltn              # rename tool: long-tool-name → ltn
+    echo: ping                       # rename: echo → ping
+
+  hide:
+    - debug-dump                     # hide from ls and help
+    - internal-tool
+
+  groups:
+    mail:                            # create "mail" namespace
+      - send
+      - reply
+      - draft-create
+
+  flags:
+    echo:
+      message: msg                   # rename flag: --message → --msg
+
+  resource_verb: fetch               # "fetch URI" instead of "get URI"
+```
+
+After editing the config, run `mcp2cli link create --name work --force` to
+also refresh the alias man page with the updated surface.
+
+---
+
+## Transports
+
+### Streamable HTTP
+
+JSON-RPC 2.0 over HTTP with optional SSE streaming for server-pushed events.
+Session negotiation via `initialize`/`initialized`. Supports HTTP auth headers.
+
+```yaml
+server:
+  transport: streamable_http
+  endpoint: http://127.0.0.1:3001/mcp
+```
+
+### Stdio
+
+Spawns a subprocess. JSON-RPC messages are sent on the subprocess's stdin and
+read from its stdout. Stderr from the subprocess is forwarded to the terminal.
+
+```yaml
+server:
+  transport: stdio
+  stdio:
+    command: npx
+    args: ['@modelcontextprotocol/server-everything']
+```
+
+### Demo (offline)
+
+Using an `*.invalid` endpoint enables file-backed offline demo mode.
+No server needed. Useful for learning and offline testing.
+
+```bash
+mcp2cli config init --name demo --endpoint https://demo.invalid/mcp
+mcp2cli use demo
+mcp2cli ls
+```
+
+---
+
+## Event System
+
+Runtime events (progress, job updates, auth, errors) route to configurable sinks:
+
+| Sink | Config key | Description |
+|------|-----------|-------------|
+| stderr | `enable_stdio_events: true` | Print to terminal |
+| HTTP webhook | `http_endpoint: URL` | POST JSON events |
+| Unix socket | `local_socket_path: PATH` | NDJSON stream |
+| SSE server | `sse_endpoint: ADDR` | Browser-accessible event stream |
+| Command exec | `command: CMD` | Shell command with `$MCP_EVENT_*` env vars |
+
+---
+
+## Daemon Mode
+
+The daemon keeps an MCP session alive in the background so subsequent
+invocations skip cold-start connection overhead.
+
+```bash
+mcp2cli daemon start --name work   # connect once; stay running
+work echo --message hello           # uses warm session (low latency)
+mcp2cli daemon stop  --name work   # disconnect
+```
+
+---
+
+## Authentication
+
+Full OAuth2 PKCE flow for servers that require authentication.
+Tokens are stored in `~/.local/share/mcp2cli/instances/<name>/tokens.json`.
+
+```bash
+work auth login          # opens browser, completes flow
+work auth status         # inspect stored session
+work auth logout         # clear tokens
+```
+
+---
+
+## Telemetry
+
+Anonymous, non-sensitive, opt-out. Records command category, transport type,
+feature flags, outcome, duration. **Never** records endpoints, tool names,
+argument values, or user identifiers.
+
+```bash
+# Opt out (any of these works)
+export MCP2CLI_TELEMETRY=off
+export DO_NOT_TRACK=1
+mcp2cli --no-telemetry ls
+```
+
+Config file:
+```yaml
+telemetry:
+  enabled: false
+```
+
+Events are written locally to `~/.local/share/mcp2cli/telemetry.ndjson`.
+
+---
+
+## Man Pages
+
+```bash
+mcp2cli man install              # install/refresh mcp2cli(1)
+mcp2cli link create --name work  # creates work(1) + refreshes mcp2cli(1)
+man mcp2cli                      # read host man page
+man work                         # read alias man page
+
+# Custom location
+mcp2cli man install --dir /usr/local/share/man/man1
+mcp2cli link create --name work --man-dir /usr/local/share/man/man1
+
+# Skip man page for an alias
+mcp2cli link create --name work --no-man
+```
+
+Alias man pages include: NAME, SYNOPSIS, DESCRIPTION, GLOBAL OPTIONS,
+BUILT-IN COMMANDS, MCP TOOLS / MCP RESOURCES / MCP PROMPTS (with full flag
+documentation from the cached discovery inventory), ENVIRONMENT, FILES,
+SEE ALSO, NOTES.
+
+---
+
+## Environment Variables
+
+```
+MCP2CLI_CONFIG_DIR       named config directory (default: ~/.config/mcp2cli)
+MCP2CLI_DATA_DIR         data/state directory (default: ~/.local/share/mcp2cli)
+MCP2CLI_BIN_DIR          symlink alias directory (default: ~/.local/bin)
+MCP2CLI_CONFIG           explicit config file path (bypasses named lookup)
+MCP2CLI_TELEMETRY        off|0|false to disable telemetry
+DO_NOT_TRACK=1           standard opt-out signal
+RUST_LOG                 tracing filter, e.g. mcp2cli=debug
+```
+
+Config fields can also be overridden with `MCP2CLI_` prefix + `__` separator:
+
+```bash
+MCP2CLI_LOGGING__LEVEL=debug work ls
+MCP2CLI_DEFAULTS__TIMEOUT_SECONDS=30 work long-operation
+```
+
+---
+
+## Files
+
+```
+~/.config/mcp2cli/configs/<name>.yaml              named config
+~/.local/share/mcp2cli/host/active-config.json     active config pointer
+~/.local/share/mcp2cli/instances/<name>/state.json per-config state
+~/.local/share/mcp2cli/instances/<name>/tokens.json auth tokens
+~/.local/share/mcp2cli/telemetry.ndjson            telemetry events
+~/.local/bin/<alias>                               symlink alias
+~/.local/share/man/man1/mcp2cli.1                  host man page
+~/.local/share/man/man1/<alias>.1                  alias man page
+```
+
+---
+
+## Error Patterns
+
+| Message | Cause | Fix |
+|---------|-------|-----|
+| `no named config 'X' found` | Config not created | `mcp2cli config init --name X ...` |
+| `link already exists` | Symlink exists | Add `--force` |
+| `'X' is reserved` | Name is a host command | Choose different name |
+| `server.endpoint must be set` | HTTP transport, no endpoint | Add `--endpoint URL` |
+| `validation error: required argument` | Required flag missing | Add the missing `--flag` |
+| `unknown command 'X'` + suggestions | Mistyped command | Check `work ls` and suggestions |
+| `live discovery failed; returned cached` | Server unreachable | Start server or use cached data offline |
+
+---
+
+## MCP Protocol Coverage
+
+Full MCP 2025-11-25 specification compliance:
+
+| Feature | MCP method(s) |
+|---------|--------------|
+| Session bootstrap | `initialize`, `initialized` |
+| Tool discovery | `tools/list` |
+| Tool invocation | `tools/call` |
+| Resource listing | `resources/list` |
+| Resource reading | `resources/read` |
+| Resource subscriptions | `resources/subscribe`, `resources/unsubscribe` |
+| Prompt listing | `prompts/list` |
+| Prompt execution | `prompts/get` |
+| Completions | `completion/complete` |
+| Ping | `ping` |
+| Logging | `logging/setLevel` |
+| Elicitation | `elicitation/create` (server→client, interactive) |
+| Sampling | `sampling/createMessage` (server→client, human-in-the-loop) |
+| Progress | `notifications/progress` |
+| Capability changes | `notifications/tools/list_changed`, etc. |
+| Cancellation | `notifications/cancelled` (bidirectional) |
+| Roots | `roots/list` |
+
+---
+
+## Source Code Structure
+
+```
+src/
+  app/mod.rs          build() + run() — application entry point
+  apps/
+    bridge.rs         BridgeApp execute() — all MCP runtime command handlers
+    dynamic.rs        clap tree builder from CommandManifest
+    manifest.rs       DiscoveryInventoryView → CommandManifest
+  cli/mod.rs          host clap structs + CommandOutput helpers
+  config/mod.rs       AppConfig, RuntimeLayout, config I/O
+  dispatch/mod.rs     resolve_invocation() — routing
+  lib.rs              public module tree
+  main.rs             tokio::main entry
+  man.rs              generate() / generate_host() / install()
+  mcp/
+    client.rs         McpClient trait + transport implementations
+    model.rs          TransportKind, protocol models
+    protocol.rs       session bootstrap helpers
+    handler.rs        server→client notification dispatch
+  observability/      tracing subscriber
+  output/mod.rs       CommandOutput, OutputFormat, render()
+  runtime/
+    host.rs           RuntimeHost: run_host() + run_app() + install_man_page()
+    state.rs          StateStore — discovery inventory, auth, jobs
+    token_store.rs    TokenStore
+    sinks.rs          EventSink implementations
+    daemon/           warm-session background daemon
+  telemetry.rs        anonymous usage telemetry
+tests/integration.rs  integration test suite
+```
+
+---
+
+## Further Reading
+
+- [AGENTS.md](AGENTS.md) — working rules for AI agents and contributors
+- [INSTALL.md](INSTALL.md) — full installation guide
+- [SKILL.md](SKILL.md) — AI assistant skill definition
+- [llms.txt](llms.txt) — concise LLM reference
+- [../getting-started.md](../getting-started.md) — step-by-step onboarding
+- [../usage-guide.md](../usage-guide.md) — comprehensive usage guide
+- [../reference/cli-reference.md](../reference/cli-reference.md) — full CLI reference
+- [../reference/config-reference.md](../reference/config-reference.md) — full config reference
+- [../index.md](../index.md) — documentation index
