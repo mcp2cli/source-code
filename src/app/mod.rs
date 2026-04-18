@@ -1,3 +1,26 @@
+//! Application bootstrap.
+//!
+//! This module is the glue between `main` and the rest of the crate.
+//! It exists to:
+//!
+//! 1. **Capture the invocation** — `argv` and the optional
+//!    `MCP2CLI_CONFIG` env override.
+//! 2. **Resolve the dispatch target** via
+//!    [`crate::dispatch::resolve_invocation`] — one of host /
+//!    app-config / ad-hoc / shim.
+//! 3. **Load the active config** (when required by the target) — the
+//!    YAML file under the project config dir, merged with environment
+//!    overrides via `figment`.
+//! 4. **Wire up services** — observability (tracing subscriber),
+//!    telemetry, state store, token store, runtime event broker, and
+//!    the transport-appropriate [`crate::mcp::client::McpClient`].
+//! 5. **Hand off** — [`run`] drives the resolved target through
+//!    [`crate::runtime::RuntimeHost`] and returns the exit status.
+//!
+//! The separation between [`build`] and [`run`] keeps the process
+//! entry point (`main`) tiny and lets tests construct an `AppState`
+//! directly without re-parsing argv.
+
 use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
 use anyhow::Result;

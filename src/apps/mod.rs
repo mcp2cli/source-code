@@ -1,3 +1,29 @@
+//! Per-app CLI surfaces and shared app-context plumbing.
+//!
+//! Once [`crate::dispatch`] decides an invocation targets a specific
+//! app (i.e. a named MCP server binding), this module owns the parse →
+//! plan → execute path:
+//!
+//! - [`bridge`] — the **static** `BridgeCli`. A fixed `clap` tree
+//!   (`ls`, `invoke`, `get`, `prompt`, `ping`, `doctor`, `auth`,
+//!   `jobs`, `log`, `complete`, `subscribe`, `unsubscribe`, etc.).
+//!   Used as a fallback when no discovery cache exists yet, and as
+//!   the backing for protocol-shaped commands.
+//! - [`dynamic`] — the **dynamic** CLI. When a discovery cache is
+//!   available, [`dynamic::build_dynamic_cli`] reads a
+//!   [`manifest::CommandManifest`] and materialises a server-specific
+//!   `clap::Command` tree (one subcommand per tool, resource, or
+//!   prompt, with flags derived from JSON Schema). Dotted tool names
+//!   like `email.send` nest automatically.
+//! - [`manifest`] — the model that powers `dynamic`. Transforms raw
+//!   discovery items + an optional profile overlay (rename / hide /
+//!   group / alias) into a flat list of commands with typed flag
+//!   specs.
+//!
+//! [`AppContext`] threads config, runtime services, and timeout
+//! overrides through each command path and exposes a single
+//! `perform(operation)` → [`McpOperationResult`] helper.
+
 pub mod bridge;
 pub mod dynamic;
 pub mod manifest;

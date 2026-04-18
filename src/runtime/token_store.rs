@@ -1,3 +1,17 @@
+//! Token store — cached bearer tokens and OAuth refresh material.
+//!
+//! Backs the `auth login/logout/status` commands in
+//! [`crate::apps::bridge`] and the bearer-token injection in the
+//! streamable-HTTP transport ([`crate::mcp::client`]). Tokens are
+//! keyed by config name so multiple MCP server bindings can each hold
+//! their own credentials.
+//!
+//! Storage is a JSON file under the runtime data dir; access is
+//! serialised through a tokio mutex. File permissions are tightened
+//! to `0600` on Unix at write time. A rotation timestamp is recorded
+//! alongside each token so `auth status` can warn before refresh is
+//! due.
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

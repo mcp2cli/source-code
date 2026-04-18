@@ -1,3 +1,45 @@
+//! Configuration schema and active-config selection.
+//!
+//! Each named MCP server binding lives as a YAML file at
+//! `$XDG_CONFIG_HOME/mcp2cli/configs/<name>.yaml` ([`AppConfig`]).
+//! The active selection (which config `mcp2cli ls/invoke/...`
+//! operates on by default) is persisted at
+//! `$XDG_CONFIG_HOME/mcp2cli/active.yaml`.
+//!
+//! # Loading pipeline
+//!
+//! [`load_active_config`] runs this pipeline:
+//!
+//! 1. Figure out **which** config to load — either an explicit
+//!    `--config <path>` / `MCP2CLI_CONFIG` env, the CLI-invocation
+//!    alias, or the saved active selection.
+//! 2. Parse the YAML with `figment`, layering:
+//!    - Built-in defaults.
+//!    - The YAML file itself.
+//!    - Environment overrides prefixed `MCP2CLI_` (e.g.
+//!      `MCP2CLI_SERVER__ENDPOINT=https://prod.api/mcp`).
+//! 3. Validate the result into a [`ResolvedAppConfig`] — which also
+//!    includes the runtime layout
+//!    ([`RuntimeLayout`]: directories where state, caches, and
+//!    tokens live).
+//!
+//! # Config shape
+//!
+//! The YAML tree maps to [`AppConfig`]:
+//!
+//! - `app.profile` — which profile to apply (overlays rename/hide
+//!   commands). See [`crate::apps::manifest`] for how profiles are
+//!   consumed.
+//! - `server.transport` — `stdio` or `streamable_http`.
+//! - `server.stdio` — command, args, env, cwd when transport is stdio.
+//! - `server.http` — endpoint URL, auth, headers when transport is
+//!   streamable HTTP.
+//! - `defaults` — timeouts, output format, log levels.
+//! - `events` — which [`crate::runtime::EventSink`]s to install (stderr,
+//!   HTTP webhook, Unix socket, SSE server, command exec).
+//! - `roots` — client-advertised root URIs for servers that query them
+//!   via `roots/list`.
+
 use std::{
     collections::BTreeMap,
     fs,
@@ -14,6 +56,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{mcp::model::TransportKind, output::OutputFormat};
 
+/// Prefix for environment-variable overrides consumed by `figment`.
+///
+/// `MCP2CLI_SERVER__ENDPOINT=https://...` maps to `server.endpoint`
+/// in the config tree (double-underscore is the nesting separator).
 const ENV_PREFIX: &str = "MCP2CLI_";
 
 /// Root configuration model for a named MCP server binding.

@@ -1,3 +1,23 @@
+//! Structured output: [`CommandOutput`], [`OutputFormat`], and
+//! renderers.
+//!
+//! Every command lowers its result to [`CommandOutput`] — a
+//! discriminated union over "data | error | report" plus an envelope
+//! carrying command metadata, exit status, and structured events.
+//! The output layer then renders the envelope in one of three modes:
+//!
+//! - `OutputFormat::Human` — coloured, multi-line, for terminals.
+//! - `OutputFormat::Json` — one JSON object per command, for scripts
+//!   and `jq` pipelines.
+//! - `OutputFormat::Ndjson` — newline-delimited JSON, each line a
+//!   self-contained event. Useful for long-running operations and
+//!   event-streaming sinks.
+//!
+//! Separating result construction from rendering means every command
+//! path (static bridge, dynamic CLI, host commands) shares one
+//! canonical representation — the `--json`/`--output ndjson` flags
+//! behave identically everywhere.
+
 use std::{
     ffi::OsString,
     io::{self, Write},

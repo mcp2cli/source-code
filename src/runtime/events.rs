@@ -1,8 +1,34 @@
+//! Runtime event bus — the in-process observability channel.
+//!
+//! [`RuntimeEvent`] is the single event type emitted by any layer
+//! (protocol, transport, runtime, bridge) that has something worth
+//! reporting: progress ticks, server logs, list-changed signals, tool
+//! displays for sampling, elicitation prompts, resource updates, and
+//! cancellations.
+//!
+//! [`EventBroker`] fans a single event out to every registered
+//! [`EventSink`] without blocking the producer. Sinks today include:
+//!
+//! - [`StderrEventSink`] — human-readable status on `stderr`.
+//! - [`MemoryEventSink`] — capture into a `Vec` for tests.
+//! - [`crate::runtime::sinks::HttpWebhookSink`] — POST NDJSON events
+//!   to a webhook.
+//! - [`crate::runtime::sinks::UnixSocketSink`] — stream NDJSON over a
+//!   Unix domain socket (e.g. for a local watcher/ sidecar).
+//! - [`crate::runtime::sinks::SseServerSink`] — expose an HTTP Server-
+//!   Sent Events endpoint so a UI can tail a live session.
+//! - [`crate::runtime::sinks::CommandExecSink`] — spawn a user command
+//!   with the serialised event on stdin.
+
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
-/// Structured event emitted during command execution for observability.
+/// Structured event emitted during command execution.
+///
+/// The `#[serde(tag = "type")]` representation serialises each variant
+/// with a top-level `"type"` discriminator. JSON sinks and the
+/// `--json` output mode read this directly without schema drift.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEvent {

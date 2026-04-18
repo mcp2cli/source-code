@@ -1,6 +1,19 @@
+//! Transport-neutral MCP operation and result types.
+//!
+//! These enums are the common vocabulary shared by every layer above
+//! the wire. [`crate::apps`] lowers user-facing commands to an
+//! [`McpOperation`]; [`crate::mcp::protocol`] turns it into JSON-RPC;
+//! [`crate::mcp::client`] sends it; decoded responses come back as
+//! an [`McpOperationResult`] for rendering.
+//!
+//! Keeping protocol-method strings out of the rest of the crate means
+//! a version bump in the MCP spec is a change inside the `mcp`
+//! module and nowhere else.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Wire transport the client configuration targets.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportKind {

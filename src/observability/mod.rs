@@ -1,3 +1,19 @@
+//! Observability — `tracing` subscriber setup.
+//!
+//! A single [`ObservabilityHandle`] installs the global
+//! `tracing-subscriber` on process start. Output destinations are
+//! driven by config ([`crate::config::LoggingConfig`]):
+//!
+//! - **stderr** — human-readable `fmt` layer; default verbosity
+//!   filtered by `RUST_LOG` / config.
+//! - **file** — rolling JSON log to a path inside the runtime data
+//!   dir; used by `mcp2cli daemon` for persistent diagnostics and by
+//!   `mcp2cli doctor` to surface recent errors.
+//!
+//! Span-level context (request id, config name, transport kind) is
+//! added by the layers so every MCP call carries enough context to
+//! correlate logs with telemetry events.
+
 use std::{
     fs::{File, OpenOptions},
     io::{self, Write},

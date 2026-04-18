@@ -1,3 +1,37 @@
+//! Dispatch — decide what kind of invocation this is.
+//!
+//! Every `mcp2cli` run starts with an `argv` vector. This module
+//! inspects `argv[0]` (the binary name / symlink) plus the flags to
+//! produce a [`DispatchTarget`] that downstream code can act on
+//! without re-parsing:
+//!
+//! | argv[0] shape                       | Resolves to                       |
+//! |-------------------------------------|-----------------------------------|
+//! | `mcp2cli` + host subcommand         | [`DispatchTarget::Host`]          |
+//! | `mcp2cli` with `--url` or `--stdio` | [`DispatchTarget::AdHoc`]         |
+//! | `mcp2cli` + app command             | [`DispatchTarget::AppConfig`]     |
+//! | `<alias>` symlink                   | [`DispatchTarget::AppConfig`]     |
+//! | `mcp-<server>-<tool>` symlink       | [`DispatchTarget::McpShim`]       |
+//!
+//! # The alias/symlink story
+//!
+//! `mcp2cli link create --name work` installs a `work` symlink next
+//! to the `mcp2cli` binary. Invoking `work ls` is equivalent to
+//! `mcp2cli --config <work-config> ls` — [`Invocation::capture`]
+//! extracts `work` from `argv[0]`'s file stem and
+//! [`resolve_invocation`] matches it against known configs.
+//!
+//! # The shim story
+//!
+//! `mcp-<server>-<tool>` is a separate naming convention for the
+//! VSOCK/Unix shim. [`parse_mcp_shim_name`] splits at the **first**
+//! dash after `mcp-` so tools can themselves contain dashes
+//! (`mcp-demo-read-file` → server `demo`, tool `read-file`). The
+//! shim has priority over config-named symlinks: a config called
+//! `mcp-demo-read-file` would be shadowed by the shim routing,
+//! which is deliberate so operators can't accidentally own the
+//! shim namespace.
+
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},

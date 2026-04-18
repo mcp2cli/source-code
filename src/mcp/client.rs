@@ -1,3 +1,45 @@
+//! MCP transport clients and the top-level `McpClient` trait.
+//!
+//! # The trait
+//!
+//! [`McpClient`] is the boundary between protocol-aware code
+//! ([`crate::mcp::protocol`]) and wire transport. Implementations:
+//!
+//! - [`StdioMcpClient`] — spawns a subprocess and exchanges
+//!   newline-delimited JSON-RPC on its stdio. Used for servers
+//!   packaged as local binaries (`npx
+//!   @modelcontextprotocol/server-everything`, Python packages, etc.).
+//! - [`StreamableHttpMcpClient`] — JSON-RPC POSTs over HTTP with
+//!   optional Server-Sent Events on the response body for
+//!   server→client notifications and mid-request streaming. Handles
+//!   the MCP session lifecycle (`mcp-session-id` header) and
+//!   bearer-token auth.
+//! - [`DaemonMcpClient`] — IPC proxy to a local `mcp2cli daemon`
+//!   holding warm connections. Transparent to callers: when a daemon
+//!   is running and healthy, `build_client` routes through it.
+//! - Demo/file-backed client — used by `mcp2cli --url
+//!   demo.invalid/mcp` for offline-friendly onboarding and tests.
+//!
+//! # Responsibilities per implementation
+//!
+//! Each client runs its own `initialize` handshake via
+//! [`crate::mcp::protocol::ProtocolEngine`], pumps the request queue,
+//! routes server-initiated messages through a
+//! [`crate::mcp::handler::ServerMessageHandler`], and surfaces
+//! progress/log events via the [`crate::runtime::EventBroker`].
+//!
+//! # The `perform_with_timeout` helper
+//!
+//! The crate's *single* execution helper is [`perform_with_timeout`].
+//! It takes an `McpClient`, an [`crate::mcp::model::McpOperation`], an
+//! event broker, an optional inventory stale path (for invalidating
+//! the discovery cache on list-change notifications), and a timeout.
+//! The helper dispatches the operation on the client, wraps it in a
+//! `tokio::time::timeout`, emits a canonical
+//! [`crate::runtime::RuntimeEvent::Info`] if the call times out, and
+//! returns the [`crate::mcp::model::McpOperationResult`] or the
+//! underlying transport error.
+
 use std::{collections::BTreeMap, path::PathBuf, process::Stdio};
 
 use anyhow::{Result, anyhow};

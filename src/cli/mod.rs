@@ -1,3 +1,30 @@
+//! Host CLI — the `mcp2cli ...` subcommand tree.
+//!
+//! These are administrative commands that don't target a specific
+//! MCP server. They manage the mcp2cli installation itself: configs,
+//! symlink aliases, the connection-reuse daemon, and the man page.
+//!
+//! The tree parses through `clap` and is rooted at [`HostCli`].
+//! [`parse_host_cli`] is the single entry point used by
+//! [`crate::runtime::RuntimeHost`] — it returns a typed
+//! [`HostCommand`] that the host then executes.
+//!
+//! Commands at a glance:
+//!
+//! - `mcp2cli config create | show | list | delete` — YAML config
+//!   management. Configs live under
+//!   `$XDG_CONFIG_HOME/mcp2cli/configs/<name>.yaml`.
+//! - `mcp2cli use <name> | clear` — switch the active config. The
+//!   active selection is recorded so subsequent `mcp2cli ls`/`invoke`
+//!   calls don't need to specify a config each time.
+//! - `mcp2cli link create <name>` — install a symlink named `<name>`
+//!   alongside the mcp2cli binary so `<name> ls`, `<name> invoke` etc.
+//!   dispatch to that config automatically.
+//! - `mcp2cli daemon start | stop | status` — control the long-lived
+//!   daemon that holds warm MCP connections between invocations.
+//! - `mcp2cli man install | show` — emit or install the `mcp2cli(1)`
+//!   man page. See [`crate::man`] for the generated nroff source.
+
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use serde_json::json;
 

@@ -1,3 +1,32 @@
+//! Persistent state store.
+//!
+//! [`StateStore`] owns everything mcp2cli persists between runs:
+//!
+//! - **Discovery inventory** — the last-seen list of tools, resources,
+//!   resource templates, and prompts for each named config. Powers
+//!   the dynamic CLI without re-querying the server on every
+//!   invocation; invalidated by
+//!   `notifications/tools/list_changed` / `.../resources/list_changed`
+//!   / `.../prompts/list_changed`.
+//! - **Negotiated capability snapshot** — what the server advertised
+//!   during the last `initialize`. Used by `mcp2cli doctor` and by
+//!   dispatch logic that needs to skip unsupported operations early.
+//! - **Auth session records** — long-lived credentials (e.g. OAuth
+//!   authorization-code flows) tied to a config. Bearer tokens
+//!   themselves live in [`crate::runtime::TokenStore`]; this store
+//!   only tracks session metadata (state, last refresh, scopes).
+//! - **Job records** — for `--background` invocations,
+//!   [`JobRecord`]s persist job id, server-side task id, status,
+//!   start/update timestamps, and final result until the user
+//!   acknowledges with `jobs clear` or TTL expires. Enables
+//!   `jobs show/wait/cancel/watch` across invocations.
+//!
+//! Storage is simple JSON files under the runtime data dir
+//! ([`crate::config::RuntimeLayout`]). Writes are serialised through
+//! an in-process `Mutex` so concurrent commands within a single
+//! process don't race; cross-process writes rely on file locking
+//! implicit in atomic rename.
+
 use std::{collections::BTreeMap, path::PathBuf};
 
 use anyhow::{Context, Result};

@@ -1,3 +1,31 @@
+//! The static `BridgeCli` — a fixed `clap` tree that works with any
+//! MCP server regardless of whether a discovery cache exists.
+//!
+//! Compared to [`crate::apps::dynamic`], which generates a bespoke
+//! CLI from cached capabilities, the bridge surface is
+//! protocol-shaped: commands name MCP primitives (`invoke`, `get`,
+//! `prompt`, `subscribe`, `complete`, `log`) rather than server
+//! tools. The bridge stays useful in four situations:
+//!
+//! 1. **First run** — there's no discovery cache yet; the dynamic CLI
+//!    can't build a tree. `ls` populates the cache via `tools/list` /
+//!    `resources/list` / `prompts/list`.
+//! 2. **Protocol-shaped use** — `mcp2cli invoke <tool> --arg k=v` is
+//!    a deterministic back-door that bypasses the generated flag
+//!    schema. Handy for tools whose JSON Schema is odd enough that
+//!    the dynamic CLI would get confused.
+//! 3. **Lifecycle and introspection commands** — `doctor`, `inspect`,
+//!    `ping`, `auth login/logout/status`, `jobs show/wait/cancel/watch`,
+//!    and `log level` never belong in the dynamic surface; they're
+//!    client operations, not server tools.
+//! 4. **Scripting** — CI and shell pipelines want stable command
+//!    shapes. The bridge's `invoke`/`get`/`prompt` commands never
+//!    change based on which server is on the other end.
+//!
+//! The bridge composes with [`crate::apps::AppContext::perform`] for
+//! every MCP call, so timeouts, events, and telemetry behave
+//! identically to the dynamic path.
+
 use std::{ffi::OsString, path::Path};
 
 use anyhow::{Result, anyhow};

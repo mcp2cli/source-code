@@ -1,3 +1,41 @@
+//! Runtime host: executes a resolved dispatch target.
+//!
+//! [`RuntimeHost`] is the command executor — it receives a
+//! [`crate::dispatch::DispatchTarget`] (the decision made by
+//! [`crate::app::build`]) and runs it. There are four shapes of
+//! execution:
+//!
+//! - **`DispatchTarget::AppConfig`** (the common path) — resolve the
+//!   named config, check whether a discovery cache is populated, and
+//!   pick between the dynamic CLI
+//!   ([`crate::apps::dynamic::build_dynamic_cli`]) and the static
+//!   bridge ([`crate::apps::bridge::BridgeCli`]). Either way, the
+//!   selected command lowers to an
+//!   [`crate::mcp::model::McpOperation`] and flows through
+//!   [`crate::apps::AppContext::perform`].
+//! - **`DispatchTarget::Host`** — the host CLI lives in
+//!   [`crate::cli`]. These are the mcp2cli-administrative commands:
+//!   `config` (create/show/list/delete configs), `use` (switch active
+//!   config), `link` (install `name` symlink aliases), `daemon`
+//!   (start/stop/status the connection-reuse daemon), and `man` (emit
+//!   or install the man page).
+//! - **`DispatchTarget::AdHoc`** — no config on disk. The user
+//!   passed `--url <URL>` or `--stdio <CMD>`; we build an ephemeral
+//!   [`crate::config::ResolvedAppConfig`] in-memory and reuse the
+//!   `AppConfig` code path.
+//! - **`DispatchTarget::McpShim`** — the `mcp-<server>-<tool>` symlink
+//!   form. [`run_mcp_shim`] reads the tool cache, builds a JSON-RPC
+//!   `tools/call` from argv, and dials the MCP bridge over
+//!   AF_VSOCK or AF_UNIX via [`crate::mcp::vsock_shim`].
+//!
+//! [`RuntimeServices`] is the shared bag of handles —
+//! [`crate::runtime::StateStore`], [`crate::runtime::TokenStore`],
+//! [`crate::runtime::EventBroker`], the selected
+//! [`crate::mcp::client::McpClient`], and the
+//! [`crate::telemetry::TelemetryRecorder`]. All execution paths
+//! receive a cloned `RuntimeServices`, which keeps the hot path
+//! allocation-light and tests easy to wire up.
+
 use std::{
     fs,
     path::{Path, PathBuf},

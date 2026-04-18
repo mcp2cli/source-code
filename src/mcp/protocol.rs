@@ -1,3 +1,39 @@
+//! MCP JSON-RPC protocol engine.
+//!
+//! This is the deepest protocol-aware module in the crate. It owns:
+//!
+//! - **JSON-RPC 2.0 framing** — [`JsonRpcRequest`], [`JsonRpcResponse`],
+//!   [`JsonRpcError`], [`JsonRpcId`].
+//! - **The `initialize` state machine** — [`ProtocolEngine`] tracks
+//!   protocol version, client/server capabilities, and whether the
+//!   `initialized` notification has been sent. Transports call
+//!   `initialize` / `complete_initialize` once per session before any
+//!   other request flows.
+//! - **Operation → request mapping** — `prepare_request` turns a
+//!   transport-neutral [`McpOperation`] into a
+//!   [`PreparedProtocolRequest`] ready for the wire. This is where
+//!   method names get picked (`tools/call`, `resources/read`,
+//!   `prompts/get`, `completion/complete`, `logging/setLevel`,
+//!   `resources/subscribe`, `resources/unsubscribe`, `tasks/get`,
+//!   `tasks/cancel`, `tasks/result`, `ping`, and the various `*/list`
+//!   discovery methods).
+//! - **Progress-token injection** — operations that support
+//!   long-running progress (`tools/call`, `resources/read`,
+//!   `prompts/get`, and background tasks) have a unique progress token
+//!   attached in `_meta.progressToken`. The matching
+//!   `notifications/progress` stream is correlated back to the
+//!   operation by [`crate::mcp::handler`].
+//! - **Background-job augmentation** — when a caller passes
+//!   `background=true`, the engine sets `_meta.task` on `tools/call`
+//!   so the server creates a task and returns a `task_id` the client
+//!   can later poll with `tasks/get` / `tasks/result` and cancel with
+//!   `tasks/cancel` (MCP 2025-11-25 tasks extension).
+//!
+//! Response decoding lives alongside the request builders — each
+//! operation has a corresponding `decode_*` helper that turns the
+//! raw [`serde_json::Value`] back into an
+//! [`crate::mcp::model::McpOperationResult`].
+
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};

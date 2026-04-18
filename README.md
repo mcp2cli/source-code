@@ -136,23 +136,23 @@ work email draft create --subject "New draft"
 
 ### Protocol Coverage
 
-Full MCP 2025-11-25 protocol support:
+Full [MCP 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) implementation. See the **[Protocol Coverage reference](docs/protocol-coverage.md)** for per-feature detail, source pointers, and CLI examples.
 
-| Feature | Details |
-|---------|---------|
-| Discovery | `ls` with persistent cache and offline fallback |
-| Tool invocation | Typed flags, required/optional enforcement, enums, defaults |
-| Resource reading | `get <URI>` for concrete resources, parameterized templates as commands |
-| Resource subscriptions | `subscribe`/`unsubscribe` for server-pushed change notifications |
-| Prompt execution | Prompts as commands with typed flags from metadata |
-| [Elicitation](docs/features/elicitation-and-sampling.md) | Interactive terminal prompts for `elicitation/create` (form + URL modes) |
-| [Sampling](docs/features/elicitation-and-sampling.md) | Human-in-the-loop `sampling/createMessage` with tool display |
-| Completions | `complete` for tab-completion values from server |
-| Ping & logging | Liveness check, server-side log level control |
-| [Background jobs](docs/features/background-jobs.md) | `--background` + `jobs show/wait/cancel/watch` for long-running operations |
-| Notifications | Progress, logs, capability changes, resource updates, cancellation |
-| Roots | Client `roots/list` capability with configurable root URIs |
-| Cancellation | Bidirectional: client→server on Ctrl+C, server→client acknowledgement |
+| Category | Methods / notifications | mcp2cli surface |
+|---|---|---|
+| **Lifecycle** | `initialize`, `notifications/initialized`, `ping` | One handshake per session; `ping` exposed as a CLI command |
+| **Discovery** | `tools/list`, `resources/list`, `resources/templates/list`, `prompts/list` + `notifications/*/list_changed` | `ls` populates a persistent cache; list-change notifications invalidate it automatically |
+| **Tool invocation** | `tools/call` | Typed `clap` flags from JSON Schema (required/optional, enums, defaults, nested objects); progress token attached automatically |
+| **Resources** | `resources/read`, `resources/subscribe`, `resources/unsubscribe`, `notifications/resources/updated` | `get <URI>` for concrete reads; parameterised templates surface as commands; `subscribe`/`unsubscribe` stream change events |
+| **Prompts** | `prompts/get` | Each prompt becomes a command with typed argument flags derived from the prompt definition |
+| **Completions** | `completion/complete` | `complete` command with `ref` context (resource or prompt) per MCP 2025-11-25 |
+| **Logging** | `logging/setLevel`, `notifications/message` | `log level <LEVEL>`; server-emitted logs are surfaced as runtime events and written to the configured sinks |
+| **Progress** | `notifications/progress` + `_meta.progressToken` | Progress tokens auto-attached to long-running ops; ticks rendered to stderr or event sinks |
+| **Cancellation** | `notifications/cancelled` (bidirectional) | Ctrl+C sends a cancel for the in-flight request; inbound cancels are acknowledged |
+| **Elicitation** *(server→client)* | [`elicitation/create`](docs/features/elicitation-and-sampling.md) | Interactive terminal prompt — form mode (typed fields from JSON Schema) + URL mode (open-in-browser) |
+| **Sampling** *(server→client)* | [`sampling/createMessage`](docs/features/elicitation-and-sampling.md) | Human-in-the-loop review with tool display before forwarding to the LLM |
+| **Roots** *(server→client)* | `roots/list` | Client advertises configurable root URIs; servers query on demand |
+| **Tasks** *(MCP 2025-11-25)* | `tasks/get`, `tasks/result`, `tasks/cancel`, `_meta.task` on `tools/call` | [`--background`](docs/features/background-jobs.md) creates a task; `jobs show/wait/cancel/watch` tracks it across invocations |
 
 ### Operations
 
