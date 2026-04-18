@@ -1,84 +1,31 @@
 ---
-// A static terminal block — always dark (zsh-style), regardless of
-// the site's light/dark mode. Renders the inner HTML as a single
-// escaped string so whitespace inside <pre> stays predictable.
+import { Code } from 'astro-expressive-code/components';
 
-type Line =
-  | { kind: 'prompt'; text: string; comment?: string }
-  | { kind: 'output'; text: string }
-  | { kind: 'blank' };
+// The landing-page demo session is rendered through the same <Code>
+// component used for every docs code block, so it inherits identical
+// framing, padding, font, copy button, theme sync, and titlebar
+// styling. The `shellsession` grammar highlights $ prompts, syntax-
+// colours the command, and dims the output lines — the visual
+// separation we used to paint by hand, now done by the highlighter.
 
-const lines: Line[] = [
-  { kind: 'prompt', text: 'cargo install --path .', comment: '# install' },
-  { kind: 'output', text: '   Installed mcp2cli v0.1.0' },
-  { kind: 'blank' },
-  {
-    kind: 'prompt',
-    text: 'mcp2cli config init --name work \\\n             --transport streamable_http \\\n             --endpoint http://127.0.0.1:3001/mcp',
-  },
-  { kind: 'output', text: 'Config "work" created.' },
-  { kind: 'blank' },
-  { kind: 'prompt', text: 'mcp2cli link create --name work' },
-  { kind: 'output', text: 'Linked: ~/.local/bin/work → mcp2cli' },
-  { kind: 'blank' },
-  { kind: 'prompt', text: 'work ls', comment: '# discover capabilities' },
-  { kind: 'output', text: 'tools:     echo  search  email.send  email.reply' },
-  { kind: 'output', text: 'resources: file:///{path}  demo://readme' },
-  { kind: 'output', text: 'prompts:   summarise  review-diff' },
-  { kind: 'blank' },
-  {
-    kind: 'prompt',
-    text: 'work email send --to user@example.com --body "Meeting at 3"',
-  },
-  { kind: 'output', text: '✓ queued (delivery_id: a4f2…)' },
-];
+const session = `$ cargo install --path .    # install
+   Installed mcp2cli v0.1.0
 
-const escape = (s: string) =>
-  s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+$ mcp2cli config init --name work \\
+    --transport streamable_http \\
+    --endpoint http://127.0.0.1:3001/mcp
+Config "work" created.
 
-// Palette pinned here so the terminal stays dark even in light-mode.
-// Colours are lifted straight from the `github-dark-dimmed` Shiki
-// theme that Expressive Code uses for dark-mode code fences, so
-// commands read identically whether they appear in this terminal
-// mockup or in a rendered code block.
-const C = {
-  prompt: '#768390',   // comment tone — muted, matches `#` in code
-  command: '#adbac7',  // default foreground in github-dark-dimmed
-  comment: '#768390',  // comment tone
-  output: '#8c959f',   // slightly lighter than comment for legibility
-};
+$ mcp2cli link create --name work
+Linked: ~/.local/bin/work → mcp2cli
 
-const html = lines
-  .map((line) => {
-    if (line.kind === 'blank') return '';
-    if (line.kind === 'output') {
-      return `<span style="color:${C.output}">${escape(line.text)}</span>`;
-    }
-    const body = `<span style="color:${C.prompt}">$ </span><span style="color:${C.command}">${escape(line.text)}</span>`;
-    const comment = line.comment
-      ? `  <span style="color:${C.comment}">${escape(line.comment)}</span>`
-      : '';
-    return `${body}${comment}`;
-  })
-  .join('\n');
+$ work ls    # discover capabilities
+tools:     echo  search  email.send  email.reply
+resources: file:///{path}  demo://readme
+prompts:   summarise  review-diff
+
+$ work email send --to user@example.com --body "Meeting at 3"
+✓ queued (delivery_id: a4f2…)`;
 ---
 
-<div class="overflow-hidden rounded-lg border border-zinc-800 bg-[#0a0a0a] shadow-xl">
-  <div
-    class="flex items-center justify-between border-b border-zinc-800 bg-[#141414] px-4 py-2 text-xs text-zinc-500"
-  >
-    <div class="flex items-center gap-1.5">
-      <span class="h-2.5 w-2.5 rounded-full bg-zinc-700"></span>
-      <span class="h-2.5 w-2.5 rounded-full bg-zinc-700"></span>
-      <span class="h-2.5 w-2.5 rounded-full bg-zinc-700"></span>
-    </div>
-    <div class="font-mono">~/projects/work</div>
-    <div class="w-12"></div>
-  </div>
-  <pre
-    class="overflow-x-auto px-4 py-4 font-mono text-[13px] leading-6 text-zinc-200"><code set:html={html} /></pre>
-</div>
+<Code code={session} lang="shellsession" title="~/projects/work" />
