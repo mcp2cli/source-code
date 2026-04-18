@@ -9,11 +9,13 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
   >
     <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
       <span>
-        Operated by
+        Created with <span class="text-[color:#e11d48]" aria-label="love">♥</span> by
         <a
           href="https://tsok.org"
+          target="_blank"
+          rel="noopener noreferrer"
           class="text-foreground underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
-          >TSOK</a
+          >The Source of Knowledge</a
         >.
       </span>
       <span class="hidden sm:inline">·</span>
@@ -21,10 +23,6 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
     </div>
 
     <div class="flex items-center gap-4">
-      <a
-        href="https://github.com/mcp2cli/source-code"
-        class="transition hover:text-foreground">GitHub</a
-      >
       <a href={`${base}/llms.txt`} class="transition hover:text-foreground">llms.txt</a>
       <span class="hidden sm:inline">© {year}</span>
     </div>
