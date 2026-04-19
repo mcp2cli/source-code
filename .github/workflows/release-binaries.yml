@@ -110,7 +110,13 @@ jobs:
           cp LICENSE "$stage/" 2>/dev/null || true
           cp README.md "$stage/" 2>/dev/null || true
           tar -cJf "${stage}.tar.xz" "$stage"
-          sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
+          # macOS runners don't ship sha256sum; shasum -a 256 matches the
+          # `<hash>  <filename>` format on both Linux and macOS.
+          if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
+          else
+              shasum -a 256 "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
+          fi
           echo "archive=${stage}.tar.xz"           >> "$GITHUB_OUTPUT"
           echo "sha256=${stage}.tar.xz.sha256"     >> "$GITHUB_OUTPUT"
 
