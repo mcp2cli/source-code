@@ -44,6 +44,11 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
 
+    <script>
+      import { initSiteTelemetry } from '@/lib/site-telemetry';
+      initSiteTelemetry();
+    </script>
+
     <script is:inline>
       (() => {
         const root = document.documentElement;
