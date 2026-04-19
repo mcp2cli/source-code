@@ -74,7 +74,7 @@ graph TB
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](getting-started.md) | Install, configure, and run your first command in 5 minutes |
+| [Getting Started](getting-started.md) | Install, configure, and run your first command in under a minute |
 | [Configuration Reference](reference/config-reference.md) | Complete YAML config schema with every field explained |
 | [CLI Reference](reference/cli-reference.md) | Every command, flag, and option in one place |
 | [Telemetry](telemetry-collection.md) | What's collected, how to opt out, and how to set up a backend |

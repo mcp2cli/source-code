@@ -1,6 +1,6 @@
 # Getting Started with mcp2cli
 
-Get from zero to running MCP commands in under 5 minutes.
+Get from zero to running MCP commands in under a minute.
 
 ---
 
