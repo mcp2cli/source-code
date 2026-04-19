@@ -161,5 +161,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ needs.plan.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
             artifacts/SHA256SUMS \
             --clobber
