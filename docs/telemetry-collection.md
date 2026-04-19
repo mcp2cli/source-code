@@ -24,11 +24,38 @@ The system is designed with three principles:
 ## Default collector
 
 Out of the box, batched events are POSTed to
-`https://telemetry.mcp2cli.dev/ingest` (a first-party endpoint on
-the mcp2cli.dev zone — no third-party trackers). Override the URL
-with `telemetry.endpoint` in your config, set it to `null` to keep
-events purely local, or opt out entirely via any of the mechanisms
-below.
+`https://telemetry.mcp2cli.dev/v1/traces` as **OTLP/HTTP JSON
+spans** — the standard OpenTelemetry wire format. Any OTEL
+Collector can ingest them natively; the only server-side code is
+whatever routes traffic to the Collector. No third-party trackers.
+Override the URL with `telemetry.endpoint` in your config, set it
+to `null` to keep events purely local, or opt out entirely via any
+of the mechanisms below.
+
+## Install attribution (three IDs)
+
+To close the loop between "someone copied the curl install command
+on the website" and "someone ran `mcp2cli` for the first time",
+three random UUIDs flow through the pipeline:
+
+| ID | Created by | Lifetime | Purpose |
+|---|---|---|---|
+| `visitor_id` | Browser (`sessionStorage`) on first page visit | One browser session | Groups page-views + install-command copies into one journey |
+| `install_id` | `install.sh` at run time | One install attempt | Unique per curl invocation; lets us measure install-to-first-run conversion |
+| `installation_id` | CLI on first run (`telemetry_id` file) | Lifetime of the installed binary | Groups every `mcp2cli` command run on this machine |
+
+`install.sh` writes `visitor_id` + `install_id` to
+`~/.local/share/mcp2cli/install_ref`. The first `mcp2cli` run
+reads the file, attaches both IDs to its `first_run` span, and
+deletes the file (one-shot). Subsequent commands are correlated
+via `installation_id` alone.
+
+Every opt-out mechanism (`DO_NOT_TRACK`, `MCP2CLI_TELEMETRY=off`,
+`telemetry.enabled: false`, `--no-telemetry`, a `mcp2cli_no_track`
+localStorage flag in the browser) suppresses *all three* — the
+browser omits the `--ref=` flag, the installer skips its beacon,
+and the CLI never ships events. None of the IDs identifies a
+person.
 
 ---
 

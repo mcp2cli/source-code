@@ -68,6 +68,67 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
         }
       })();
     </script>
+
+    {/* Install-command attribution — tags the one-line curl install
+        on every page with a per-browser-session visitor UUID so
+        downstream CLI runs can be correlated to the web session
+        that produced them. Opt-out via DNT or a localStorage flag. */}
+    <script is:inline>
+      (() => {
+        const INSTALL_BASE = 'curl -fsSL https://mcp2cli.dev/install.sh | sh';
+        const optedOut =
+          (typeof navigator !== 'undefined' && navigator.doNotTrack === '1') ||
+          (() => {
+            try {
+              return localStorage.getItem('mcp2cli_no_track') === '1';
+            } catch {
+              return false;
+            }
+          })();
+        if (optedOut) return;
+
+        let vid = null;
+        try {
+          vid = sessionStorage.getItem('mcp2cli_visitor_id');
+          if (!vid) {
+            vid =
+              typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : Math.random().toString(36).slice(2) + Date.now().toString(36);
+            sessionStorage.setItem('mcp2cli_visitor_id', vid);
+          }
+        } catch {
+          return;
+        }
+        const tagged = INSTALL_BASE + ' -s -- --ref=' + vid;
+
+        const rewrite = () => {
+          // Replace visible text inside every <code> that renders the
+          // exact install command. Setting textContent wipes Shiki
+          // syntax-highlighting spans — intentional for this single
+          // block, and the command is short enough that a uniform
+          // foreground reads cleanly.
+          document.querySelectorAll('code').forEach((el) => {
+            if ((el.textContent || '').trim() === INSTALL_BASE) {
+              el.textContent = tagged;
+            }
+          });
+          // And patch expressive-code copy buttons so the clipboard
+          // payload matches what users see.
+          document.querySelectorAll('button[data-code]').forEach((btn) => {
+            if (btn.getAttribute('data-code') === INSTALL_BASE) {
+              btn.setAttribute('data-code', tagged);
+            }
+          });
+        };
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', rewrite);
+        } else {
+          rewrite();
+        }
+      })();
+    </script>
   </head>
   <body class="min-h-dvh flex flex-col">
     <Header />
