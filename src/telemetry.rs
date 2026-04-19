@@ -412,10 +412,7 @@ fn bool_attr(key: &str, value: bool) -> serde_json::Value {
     attr(key, serde_json::json!({ "boolValue": value }))
 }
 fn int_attr(key: &str, value: u64) -> serde_json::Value {
-    attr(
-        key,
-        serde_json::json!({ "intValue": value.to_string() }),
-    )
+    attr(key, serde_json::json!({ "intValue": value.to_string() }))
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -448,10 +445,20 @@ fn to_otlp_payload(events: &[TelemetryEvent]) -> serde_json::Value {
         str_attr("service.name", "mcp2cli-cli"),
         str_attr(
             "service.version",
-            first.map(|e| e.cli_version.as_str()).unwrap_or(env!("CARGO_PKG_VERSION"))
+            first
+                .map(|e| e.cli_version.as_str())
+                .unwrap_or(env!("CARGO_PKG_VERSION"))
         ),
-        str_attr("host.os", first.map(|e| e.os.as_str()).unwrap_or(std::env::consts::OS)),
-        str_attr("host.arch", first.map(|e| e.arch.as_str()).unwrap_or(std::env::consts::ARCH)),
+        str_attr(
+            "host.os",
+            first.map(|e| e.os.as_str()).unwrap_or(std::env::consts::OS)
+        ),
+        str_attr(
+            "host.arch",
+            first
+                .map(|e| e.arch.as_str())
+                .unwrap_or(std::env::consts::ARCH)
+        ),
     ]);
 
     let spans: Vec<serde_json::Value> = events.iter().map(event_to_span).collect();
