@@ -63,9 +63,12 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             cross: true
-          # Intel macOS.
+          # Intel macOS — cross-compiled from arm64 runner since
+          # macos-13 (the last Intel-host runner) is being retired.
+          # Rust supports x86_64-apple-darwin natively from Apple
+          # Silicon via `rustup target add`.
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-14
             cross: false
           # Apple Silicon macOS.
           - target: aarch64-apple-darwin
