@@ -24,13 +24,6 @@
         "command": "cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings"
       },
       "cache": false
-    },
-    "release:postversion": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "node tools/release/post-version.mjs"
-      },
-      "cache": false
     }
   },
   "release": {

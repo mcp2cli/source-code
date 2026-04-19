@@ -5,11 +5,10 @@
     "releaseTagPattern": "v{version}",
     "version": {
       "conventionalCommits": true,
+      "versionActions": "./tools/release/version-actions.js",
       "generatorOptions": {
         "skipLockFileUpdate": true
       },
-      "preVersionCommand": "",
-      "postVersionCommand": "node tools/release/post-version.mjs",
       "git": {
         "commit": true,
         "commitMessage": "chore(release): v{version}",
