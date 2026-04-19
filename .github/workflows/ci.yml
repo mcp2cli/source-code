@@ -10,6 +10,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Opt every JS-based action into Node 24 ahead of GitHub's forced
+# migration (Sep 2026). Kills the per-step "Node 20 is deprecated"
+# warnings from actions/checkout, setup-node, pnpm/action-setup, etc.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 # Cargo / Rust jobs run directly here rather than through the org's
 # nx-ci.yml because Nx's affected-projects logic is overkill for a
 # single-crate workspace. The project.json wires `nx run mcp2cli:lint
