@@ -13,13 +13,51 @@ Get from zero to running MCP commands in under 5 minutes.
 
 ## Install
 
-```bash
-# From source
-cargo install --path .
+Three ways to get `mcp2cli` on your PATH — pick whichever fits
+your flow.
 
-# Verify
+### 1. One-command install (recommended)
+
+Works on any POSIX shell. The script detects `cargo`, warns if
+`~/.cargo/bin` isn't on your PATH, and installs from the `main`
+branch.
+
+```bash
+curl -fsSL https://mcp2cli.dev/install.sh | sh
+```
+
+Or with `wget`:
+
+```bash
+wget -qO- https://mcp2cli.dev/install.sh | sh
+```
+
+### 2. With an AI agent
+
+Paste this prompt into Claude, Cursor, or any coding agent — it
+will fetch the SKILL.md instructions and set up a config for your
+MCP server:
+
+```text
+Read https://mcp2cli.dev/SKILL.md and set up a cli for my mcp server
+```
+
+### 3. With `cargo`
+
+If you already have a Rust toolchain:
+
+```bash
+cargo install --git https://github.com/mcp2cli/source-code --locked
+```
+
+### Verify
+
+```bash
 mcp2cli --version
 ```
+
+See the [full install guide](files/install.md) for requirements,
+man-page setup, PATH configuration, updating, and uninstall steps.
 
 ---
 

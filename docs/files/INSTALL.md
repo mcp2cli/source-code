@@ -63,6 +63,23 @@ mcp2cli --version
 
 ---
 
+## Or install with an AI agent
+
+If you use Claude, Cursor, or another coding assistant, paste this
+prompt — the agent fetches the `SKILL.md` served from the site and
+runs the install end-to-end:
+
+```text
+Read https://mcp2cli.dev/SKILL.md and set up a cli for my mcp server
+```
+
+The skill file is served at [`/SKILL.md`](/SKILL.md) (raw markdown)
+so agents can consume it directly via `curl` / `WebFetch`. It
+contains a concise project summary, install instructions, and
+conventions for setting up named configs and aliases.
+
+---
+
 ## Install from source (manual)
 
 Prefer to do it by hand, or need to build from a local checkout?
