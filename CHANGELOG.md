@@ -1,3 +1,21 @@
+## 0.1.2 (2026-04-19)
+
+### Fixes
+
+- **ci:** use shasum on macOS where sha256sum is absent
+- **install:** strip com.apple.quarantine so macOS Gatekeeper doesn't block
+- **release:** backtick <Code> in changelog so GitHub doesn't parse it as HTML
+- **release:** fan version bump out to Cargo.toml / Cargo.lock / llms-full.txt
+- **release:** consolidate Nx git config at top level
+
+### Docs
+
+- correct time-to-first-command from 5 min to under a minute
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.1 (2026-04-19)
 
 ### Features
