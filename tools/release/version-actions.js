@@ -10,7 +10,6 @@
 // Why this instead of `postVersionCommand`: that key existed in Nx < 22
 // but was removed. `afterAllProjectsVersioned` is its Nx 22 replacement.
 
-const { spawnSync } = require('node:child_process');
 const { readFileSync, writeFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 
@@ -73,20 +72,18 @@ async function afterAllProjectsVersioned(cwd, opts) {
     log(`Cargo.toml → ${version}`);
   }
 
-  // Cargo.lock — regenerate via cargo so we don't hand-edit it.
+  // Cargo.lock — patch the mcp2cli [[package]] entry's version line
+  // textually. We used to shell out to `cargo check` for this, but
+  // it needs a populated local registry (CI runs don't have one at
+  // this point in the workflow) and `--offline` fails on a fresh
+  // runner. A targeted regex is good enough and doesn't need network.
   {
-    const res = spawnSync('cargo', ['check', '--offline', '--quiet'], {
-      cwd,
-      stdio: 'inherit',
-    });
-    if (res.status === 0) {
-      changedFiles.push('Cargo.lock');
-      log(`Cargo.lock refreshed via cargo check`);
-    } else {
-      console.warn(
-        `  [mcp2cli-sync] cargo check failed (status ${res.status}); Cargo.lock may need a manual refresh`,
-      );
-    }
+    const file = 'Cargo.lock';
+    const content = read(cwd, file);
+    const pattern = /(\[\[package\]\]\s*\nname\s*=\s*"mcp2cli"\s*\nversion\s*=\s*)"[^"]+"/m;
+    write(cwd, file, replaceOnce(content, pattern, `$1"${version}"`, file));
+    changedFiles.push(file);
+    log(`Cargo.lock → ${version}`);
   }
 
   // docs/files/llms-full.txt — `- Version: X.Y.Z` line.
