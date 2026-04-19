@@ -37,6 +37,7 @@ export default defineEcConfig({
       editorActiveTabIndicatorTopColor: 'transparent',
       editorActiveTabBackground: 'var(--code-bg)',
       tooltipSuccessBackground: 'var(--code-chrome)',
+      tooltipSuccessForeground: 'var(--code-fg)',
     },
   },
   defaultProps: {
