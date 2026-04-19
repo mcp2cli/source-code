@@ -8,7 +8,7 @@ repository = "https://github.com/mcp2cli/source-code"
 homepage = "https://mcp2cli.dev"
 documentation = "https://mcp2cli.dev/docs"
 readme = "README.md"
-keywords = ["mcp", "cli", "model-context-protocol", "llm", "ai"]
+keywords = ["mcp", "cli", "llm", "ai", "agent"]
 categories = ["command-line-utilities", "development-tools"]
 
 [lints.clippy]
