@@ -11,7 +11,19 @@ const rawLinks = [
   <div
     class="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-10 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6"
   >
-    <span>Apache License 2.0.</span>
+    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+      <span>
+        From the team at <a
+          href="https://tsok.org"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-foreground underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
+          >The Source of Knowledge</a
+        >.
+      </span>
+      <span class="hidden sm:inline">·</span>
+      <span>Apache License 2.0.</span>
+    </div>
     <div class="flex flex-wrap items-center gap-4">
       {
         rawLinks.map((link) => (
