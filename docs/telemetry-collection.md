@@ -24,7 +24,7 @@ The system is designed with three principles:
 ## Default collector
 
 Out of the box, batched events are POSTed to
-`https://telemetry.mcp2cli.dev/v1/traces` as **OTLP/HTTP JSON
+`https://otel.mcp2cli.dev/v1/traces` as **OTLP/HTTP JSON
 spans** — the standard OpenTelemetry wire format. Any OTEL
 Collector can ingest them natively; the only server-side code is
 whatever routes traffic to the Collector. No third-party trackers.

@@ -15,7 +15,7 @@ set -eu
 REPO="https://github.com/mcp2cli/source-code"
 BRANCH="main"
 BIN="mcp2cli"
-OTLP_ENDPOINT="https://telemetry.mcp2cli.dev/v1/traces"
+OTLP_ENDPOINT="https://otel.mcp2cli.dev/v1/traces"
 
 # -------- argv parsing --------
 MCP2CLI_INSTALL_REF=""

@@ -41,7 +41,7 @@ pub struct TelemetryConfig {
     pub enabled: bool,
 
     /// HTTP endpoint for shipping events as JSON batches.
-    /// Defaults to the first-party `telemetry.mcp2cli.dev/ingest`
+    /// Defaults to the first-party `otel.mcp2cli.dev/v1/traces`
     /// collector; can be overridden in user/app config or set to
     /// `null` to keep events purely local.
     #[serde(default = "default_endpoint")]
@@ -72,7 +72,7 @@ fn default_enabled() -> bool {
 /// natively. Sending is opt-out via the usual mechanisms:
 /// `telemetry.enabled: false` in config, `MCP2CLI_TELEMETRY=off`,
 /// `DO_NOT_TRACK=1`, or `--no-telemetry`.
-pub const DEFAULT_TELEMETRY_ENDPOINT: &str = "https://telemetry.mcp2cli.dev/v1/traces";
+pub const DEFAULT_TELEMETRY_ENDPOINT: &str = "https://otel.mcp2cli.dev/v1/traces";
 
 fn default_endpoint() -> Option<String> {
     Some(DEFAULT_TELEMETRY_ENDPOINT.to_string())
