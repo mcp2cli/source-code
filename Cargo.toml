@@ -28,6 +28,7 @@ tokio = { version = "1.49.0", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json"] }
 url = "2.5.4"
+ureq = { version = "2.10", default-features = false, features = ["tls", "json"] }
 uuid = { version = "1.18.1", features = ["serde", "v4"] }
 
 [dev-dependencies]

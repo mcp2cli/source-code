@@ -16,8 +16,19 @@ mcp2cli includes opt-out anonymous usage telemetry. It helps the team understand
 The system is designed with three principles:
 
 1. **Privacy first** — no sensitive data, no identity, no tracking
-2. **Vendor agnostic** — local NDJSON files + optional HTTP POST to any collector
+2. **Vendor agnostic** — local NDJSON files + HTTP POST to any
+   collector (defaults to a first-party endpoint, can be redirected
+   or disabled in config)
 3. **User control** — multiple opt-out mechanisms, full data transparency
+
+## Default collector
+
+Out of the box, batched events are POSTed to
+`https://telemetry.mcp2cli.dev/ingest` (a first-party endpoint on
+the mcp2cli.dev zone — no third-party trackers). Override the URL
+with `telemetry.endpoint` in your config, set it to `null` to keep
+events purely local, or opt out entirely via any of the mechanisms
+below.
 
 ---
 

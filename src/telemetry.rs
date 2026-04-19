@@ -40,9 +40,11 @@ pub struct TelemetryConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 
-    /// Optional HTTP endpoint for shipping events.
-    /// Accepts any NDJSON-compatible collector (PostHog, Plausible, custom).
-    #[serde(default)]
+    /// HTTP endpoint for shipping events as JSON batches.
+    /// Defaults to the first-party `telemetry.mcp2cli.dev/ingest`
+    /// collector; can be overridden in user/app config or set to
+    /// `null` to keep events purely local.
+    #[serde(default = "default_endpoint")]
     pub endpoint: Option<String>,
 
     /// Maximum events to batch before flushing to HTTP endpoint. Default: 25.
@@ -54,7 +56,7 @@ impl Default for TelemetryConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled(),
-            endpoint: None,
+            endpoint: default_endpoint(),
             batch_size: default_batch_size(),
         }
     }
@@ -62,6 +64,16 @@ impl Default for TelemetryConfig {
 
 fn default_enabled() -> bool {
     true
+}
+
+/// Default collector URL. First-party, hosted on the mcp2cli.dev
+/// zone. Sending is opt-out via the usual mechanisms:
+/// `telemetry.enabled: false` in config, `MCP2CLI_TELEMETRY=off`,
+/// `DO_NOT_TRACK=1`, or `--no-telemetry`.
+pub const DEFAULT_TELEMETRY_ENDPOINT: &str = "https://telemetry.mcp2cli.dev/ingest";
+
+fn default_endpoint() -> Option<String> {
+    Some(DEFAULT_TELEMETRY_ENDPOINT.to_string())
 }
 
 fn default_batch_size() -> usize {
@@ -293,8 +305,10 @@ impl TelemetryRecorder {
     }
 
     /// Try to batch-ship events to the configured HTTP endpoint.
-    /// Reads the local NDJSON file, sends up to `batch_size` events,
-    /// then truncates what was sent.
+    /// Reads the local NDJSON file, POSTs up to `batch_size` events
+    /// as a JSON array, and — only on a 2xx response — truncates the
+    /// shipped events from disk. Failures leave the file intact so
+    /// the next invocation retries.
     fn try_ship_batch(&self) {
         let Some(endpoint) = &self.config.endpoint else {
             return;
@@ -312,37 +326,48 @@ impl TelemetryRecorder {
         let to_send: Vec<&str> = lines.iter().take(batch_size).copied().collect();
         let payload = format!("[{}]", to_send.join(","));
 
-        // Synchronous HTTP POST — best-effort, non-blocking for the user.
-        // In production you'd use the tokio runtime, but telemetry must not
-        // delay the CLI. We spawn a detached thread with a short timeout.
-        let endpoint = endpoint.clone();
+        // Keep exactly the lines we didn't ship so we can rewrite the
+        // file atomically if (and only if) the POST succeeds.
         let remaining: String = lines
             .iter()
             .skip(to_send.len())
             .map(|l| format!("{}\n", l))
             .collect();
-        let path_clone = path.clone();
 
+        let endpoint = endpoint.clone();
+        let path_clone = path.clone();
+        let cli_version = env!("CARGO_PKG_VERSION").to_string();
+
+        // Fire-and-forget on a detached std::thread so the CLI returns
+        // to the user immediately. A short timeout means a dead
+        // collector never blocks past a few seconds of background work.
         std::thread::spawn(move || {
-            // Use a simple blocking HTTP client (hyper is async-only in our deps,
-            // so we use a raw TcpStream + HTTP/1.1 — but for production, add ureq
-            // or reqwest[blocking]). For now, write a marker file so an external
-            // agent can pick up the batch.
-            let pending_path = path_clone.with_extension("pending.json");
-            if let Ok(mut f) = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&pending_path)
-            {
-                let ship_request = serde_json::json!({
-                    "endpoint": endpoint,
-                    "payload": payload,
-                });
-                let _ = writeln!(f, "{}", ship_request);
+            let user_agent = format!("mcp2cli/{cli_version}");
+            let agent = ureq::AgentBuilder::new()
+                .timeout_connect(Duration::from_secs(2))
+                .timeout(Duration::from_secs(5))
+                .user_agent(&user_agent)
+                .build();
+            let response = agent
+                .post(&endpoint)
+                .set("Content-Type", "application/json")
+                .send_string(&payload);
+            match response {
+                Ok(r) if (200..300).contains(&r.status()) => {
+                    // Only drop the shipped events from disk after a
+                    // confirmed 2xx — otherwise we'd lose data on a
+                    // transient collector failure.
+                    if let Err(e) = fs::write(&path_clone, remaining) {
+                        debug!("telemetry: failed to truncate after ship: {}", e);
+                    }
+                }
+                Ok(r) => {
+                    debug!("telemetry: collector returned HTTP {}", r.status());
+                }
+                Err(e) => {
+                    debug!("telemetry: ship failed, keeping events local: {}", e);
+                }
             }
-            // Truncate shipped events from the main file
-            let _ = fs::write(&path_clone, remaining);
         });
     }
 }
