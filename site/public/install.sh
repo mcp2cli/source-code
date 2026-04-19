@@ -168,6 +168,15 @@ main() {
     BIN_DIR="${MCP2CLI_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}"
     mkdir -p "$BIN_DIR"
     install -m 0755 "$src" "${BIN_DIR}/${BIN}"
+
+    # macOS Gatekeeper puts a `com.apple.quarantine` xattr on files
+    # that arrive via curl/Safari/Chrome. Stripping it avoids the
+    # "Apple could not verify … is free of malware" dialog on first
+    # launch. Silent no-op on Linux where xattr isn't installed.
+    if command -v xattr >/dev/null 2>&1; then
+        xattr -d com.apple.quarantine "${BIN_DIR}/${BIN}" 2>/dev/null || true
+    fi
+
     ok  "installed: ${BIN_DIR}/${BIN}"
 
     case ":${PATH:-}:" in
