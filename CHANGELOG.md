@@ -9,7 +9,7 @@
 - **site:** zsh-style code blocks, reorder landing, simplify hero CTAs
 - **site:** one-command installer + subtle light-mode code blocks
 - **site:** streamline header/footer
-- **site:** render landing terminal through <Code> so it matches code blocks exactly
+- **site:** render landing terminal through `<Code>` so it matches code blocks exactly
 - **site:** MCP favicon, dark-by-default theme, brighter dark code palette
 - **site:** bash-highlighted terminal + brighter dark-mode code palette
 - **site:** add Demo header above the landing terminal
