@@ -3,19 +3,19 @@
   "release": {
     "projects": ["mcp2cli"],
     "releaseTagPattern": "v{version}",
-    "git": {
-      "commit": true,
-      "commitMessage": "chore(release): v{version}",
-      "tag": true,
-      "stageChanges": true
-    },
     "version": {
       "conventionalCommits": true,
       "generatorOptions": {
         "skipLockFileUpdate": true
       },
       "preVersionCommand": "",
-      "postVersionCommand": "node tools/release/post-version.mjs"
+      "postVersionCommand": "node tools/release/post-version.mjs",
+      "git": {
+        "commit": true,
+        "commitMessage": "chore(release): v{version}",
+        "tag": true,
+        "stageChanges": true
+      }
     },
     "releaseTagPatternCheckAllBranchesWhen": ["main", "next", "develop"],
     "changelog": {
@@ -25,11 +25,17 @@
         "createRelease": "github",
         "renderOptions": {
           "authors": true,
-          "commitReferences": true,
+          "commitReferences": false,
           "versionTitleDate": true
         }
       },
-      "projectChangelogs": false
+      "projectChangelogs": false,
+      "git": {
+        "commit": true,
+        "commitMessage": "chore(release): v{version}",
+        "tag": false,
+        "stageChanges": true
+      }
     },
     "conventionalCommits": {
       "types": {
