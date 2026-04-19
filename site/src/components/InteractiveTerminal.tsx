@@ -95,6 +95,52 @@ const WIZARD_STEP: Step = {
         { kind: 'output', text: 'ok      ready', tone: 'ok' },
       ],
     },
+    {
+      id: 'background',
+      label: 'work invoke --background',
+      hint: 'Long-running job via the MCP 2025-11-25 tasks extension',
+      run: [
+        { kind: 'prompt', text: 'work invoke big-index-build --background' },
+        { kind: 'output', text: '{ "job_id": "j-4f2a", "remote_task_id": "t-9c1e", "status": "pending" }', tone: 'muted' },
+        { kind: 'prompt', text: 'work jobs wait j-4f2a' },
+        { kind: 'output', text: '[ indexing … 42% ]', tone: 'muted' },
+        { kind: 'output', text: '[ indexing … 87% ]', tone: 'muted' },
+        { kind: 'output', text: '✓ done — 12,480 items indexed in 3.4s', tone: 'ok' },
+      ],
+    },
+    {
+      id: 'subscribe',
+      label: 'work subscribe',
+      hint: 'Stream server-pushed resource updates',
+      run: [
+        { kind: 'prompt', text: 'work subscribe file:///config/current.yaml' },
+        { kind: 'output', text: 'subscribed; waiting for updates…', tone: 'muted' },
+        { kind: 'output', text: 'updated  file:///config/current.yaml  (sha256: 0x1a2b…)', tone: 'muted' },
+        { kind: 'output', text: 'updated  file:///config/current.yaml  (sha256: 0x3c4d…)', tone: 'muted' },
+      ],
+    },
+    {
+      id: 'auth',
+      label: 'work auth login',
+      hint: 'Bearer / OAuth session with persistent tokens',
+      run: [
+        { kind: 'prompt', text: 'work auth login' },
+        { kind: 'output', text: '→ Opening https://auth.example.com/device to complete OAuth…', tone: 'muted' },
+        { kind: 'output', text: '✓ stored token for "work" (expires in 7 days)', tone: 'ok' },
+      ],
+    },
+    {
+      id: 'complete',
+      label: 'work complete',
+      hint: 'Tab-completion values served by the server',
+      run: [
+        {
+          kind: 'prompt',
+          text: 'work complete --ref-type prompt --ref-name summarise --arg-name context.thread_id --value 12',
+        },
+        { kind: 'output', text: 'suggestions: 120, 121, 122, 128, 134', tone: 'muted' },
+      ],
+    },
   ],
 };
 
@@ -598,6 +644,11 @@ type Phase =
   | { kind: 'wizard'; stepIdx: number }
   | { kind: 'done' };
 
+// How many options to show in any one menu. Picked options are
+// removed, and the next unpicked option from the pool slots in, so
+// the menu always feels fresh until the pool is exhausted.
+const MENU_SIZE = 4;
+
 export default function InteractiveTerminal() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [phase, setPhase] = useState<Phase>(() =>
@@ -607,9 +658,19 @@ export default function InteractiveTerminal() {
   );
   const [runToken, setRunToken] = useState(0);
   const [wizardToken, setWizardToken] = useState(0);
+  const [pickedIds, setPickedIds] = useState<Set<string>>(new Set());
   const [skip, setSkip] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+
+  // The slice of the wizard pool that the user currently sees —
+  // all options they haven't already picked, capped to MENU_SIZE.
+  const visibleOptions: WizardOption[] = (() => {
+    if (phase.kind !== 'wizard') return [];
+    const step = SCRIPT[phase.stepIdx];
+    if (!step || step.kind !== 'wizard') return [];
+    return step.options.filter((o) => !pickedIds.has(o.id)).slice(0, MENU_SIZE);
+  })();
 
   // Auto-tail: pin the scroll container to the bottom whenever its
   // content grows. A ResizeObserver is load-bearing here — the
@@ -673,7 +734,17 @@ export default function InteractiveTerminal() {
       if (!wizardStep || wizardStep.kind !== 'wizard') return;
       // Freeze the menu into scrollback with the picked option
       // highlighted so the user sees their choice stay put, then
-      // start the picked run below it.
+      // start the picked run below it. The decision entry records
+      // exactly the options that were visible at the moment of the
+      // pick (not the full pool) — keeps scrollback honest.
+      const visibleAtPick = wizardStep.options
+        .filter((o) => !pickedIds.has(o.id))
+        .slice(0, MENU_SIZE);
+      setPickedIds((ids) => {
+        const next = new Set(ids);
+        next.add(opt.id);
+        return next;
+      });
       setHistory((h) => [
         ...h,
         {
@@ -681,7 +752,7 @@ export default function InteractiveTerminal() {
           id: `decision-${phase.stepIdx}-${Date.now()}`,
           stepIdx: phase.stepIdx,
           question: wizardStep.question,
-          options: wizardStep.options,
+          options: visibleAtPick,
           pickedId: opt.id,
         },
       ]);
@@ -693,7 +764,7 @@ export default function InteractiveTerminal() {
         stepIdx: phase.stepIdx,
       });
     },
-    [phase],
+    [phase, pickedIds],
   );
 
   const handleRunDone = useCallback(() => {
@@ -701,23 +772,33 @@ export default function InteractiveTerminal() {
     const currentStep = SCRIPT[phase.stepIdx];
     if (currentStep && currentStep.kind === 'wizard') {
       // Command picked from the wizard finished — scroll it into
-      // history and present a fresh menu below for the next pick.
+      // history. If the pool still has unpicked options, present
+      // a fresh menu below; otherwise mark the tour done so the
+      // terminal body ends on a subtle restart hint.
       setHistory((h) => [
         ...h,
         { kind: 'run', id: phase.run.id, lines: phase.run.lines },
       ]);
-      setWizardToken((n) => n + 1);
-      setPhase({ kind: 'wizard', stepIdx: phase.stepIdx });
+      const remaining = currentStep.options.filter(
+        (o) => !pickedIds.has(o.id),
+      ).length;
+      if (remaining === 0) {
+        setPhase({ kind: 'done' });
+      } else {
+        setWizardToken((n) => n + 1);
+        setPhase({ kind: 'wizard', stepIdx: phase.stepIdx });
+      }
     } else {
       advanceFromRun();
     }
-  }, [phase, advanceFromRun]);
+  }, [phase, advanceFromRun, pickedIds]);
 
   const restart = useCallback(() => {
     setHistory([]);
     setSkip(false);
     setRunToken((n) => n + 1);
     setWizardToken((n) => n + 1);
+    setPickedIds(new Set());
     const first = SCRIPT[0];
     if (first.kind === 'commands') {
       setPhase({
@@ -799,10 +880,19 @@ export default function InteractiveTerminal() {
           <Wizard
             key={wizardToken}
             question={(SCRIPT[phase.stepIdx] as { question: string }).question}
-            options={(SCRIPT[phase.stepIdx] as { options: WizardOption[] }).options}
+            options={visibleOptions}
             onPick={handlePick}
             autoFocus={history.some((h) => h.kind === 'decision')}
           />
+        ) : null}
+
+        {phase.kind === 'done' ? (
+          <div className="mb-3">
+            <div className={`${TEXT_MUTED}`}>
+              <span className={TEXT_OK}>✓</span> that's the whole tour —
+              hit the ⟳ icon above to run it again.
+            </div>
+          </div>
         ) : null}
         </div>
       </div>
