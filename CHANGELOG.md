@@ -1,3 +1,13 @@
+## 0.1.3 (2026-04-19)
+
+### Fixes
+
+- **release:** patch Cargo.lock textually instead of via cargo check
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.2 (2026-04-19)
 
 ### Fixes
