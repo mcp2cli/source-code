@@ -1,6 +1,6 @@
 {
   "name": "mcp2cli-workspace",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Monorepo root for mcp2cli — the Rust CLI lives in the repo root, the Astro docs site lives in site/.",
   "packageManager": "pnpm@9.12.3",

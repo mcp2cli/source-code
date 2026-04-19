@@ -1,3 +1,13 @@
+## 0.1.4 (2026-04-19)
+
+### Fixes
+
+- **cargo:** shorten keywords so crates.io accepts them
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.3 (2026-04-19)
 
 ### Fixes
