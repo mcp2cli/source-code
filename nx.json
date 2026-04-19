@@ -3,17 +3,17 @@
   "release": {
     "projects": ["mcp2cli"],
     "releaseTagPattern": "v{version}",
+    "git": {
+      "commit": true,
+      "commitMessage": "chore(release): v{version}",
+      "tag": true,
+      "stageChanges": true
+    },
     "version": {
       "conventionalCommits": true,
       "versionActions": "./tools/release/version-actions.js",
       "generatorOptions": {
         "skipLockFileUpdate": true
-      },
-      "git": {
-        "commit": true,
-        "commitMessage": "chore(release): v{version}",
-        "tag": true,
-        "stageChanges": true
       }
     },
     "releaseTagPatternCheckAllBranchesWhen": ["main", "next", "develop"],
@@ -28,13 +28,7 @@
           "versionTitleDate": true
         }
       },
-      "projectChangelogs": false,
-      "git": {
-        "commit": true,
-        "commitMessage": "chore(release): v{version}",
-        "tag": false,
-        "stageChanges": true
-      }
+      "projectChangelogs": false
     },
     "conventionalCommits": {
       "types": {
