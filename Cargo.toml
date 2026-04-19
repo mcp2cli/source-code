@@ -3,8 +3,23 @@ name = "mcp2cli"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
+description = "Turn any Model Context Protocol server into a native command-line application — typed --flags from JSON Schema, multi-transport, daemon mode, and shell-friendly output formats."
 repository = "https://github.com/mcp2cli/source-code"
+homepage = "https://mcp2cli.dev"
+documentation = "https://mcp2cli.dev/docs"
 readme = "README.md"
+keywords = ["mcp", "cli", "model-context-protocol", "llm", "ai"]
+categories = ["command-line-utilities", "development-tools"]
+
+[profile.release]
+# Shrink the shipped binary and trim a few percent of runtime cost
+# per release. LTO is thin so builds stay under a few minutes on
+# GitHub-Actions runners; codegen-units = 1 lets LLVM produce
+# better-inlined code. Strip debug + symbols to land at ~5-7 MB.
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+opt-level = 3
 
 [dependencies]
 anyhow = "1.0.98"

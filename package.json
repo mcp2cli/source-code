@@ -1,0 +1,20 @@
+{
+  "name": "mcp2cli-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monorepo root for mcp2cli — the Rust CLI lives in the repo root, the Astro docs site lives in site/.",
+  "packageManager": "pnpm@9.12.3",
+  "scripts": {
+    "release": "nx release",
+    "release:dry": "nx release --dry-run",
+    "release:version": "nx release version",
+    "release:changelog": "nx release changelog"
+  },
+  "devDependencies": {
+    "@nx/js": "^22.6.5",
+    "nx": "^22.6.5"
+  },
+  "workspaces": [
+    "site"
+  ]
+}

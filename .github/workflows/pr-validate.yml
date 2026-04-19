@@ -1,0 +1,19 @@
+name: PR validate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    name: Conventional commit title
+    uses: tsok-org/.github/.github/workflows/pr-validate.yml@v1
+    with:
+      validate_title: true
+      require_scope: false
+      wip_allowed: true
+      header_max_length: 100
+      auto_label: false

@@ -1,0 +1,153 @@
+name: Release binaries
+
+# Triggered by `nx-cd.yml`'s GitHub Release creation. We build a
+# matrix of target triples, strip + tar each, generate a combined
+# SHA256SUMS file, and upload everything as release assets so
+# install.sh can pull them by tag.
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach assets to (e.g. v0.2.0)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-binaries-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Resolve tag + version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        run: |
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          version="${tag#v}"
+          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native x86_64 Linux (GNU libc).
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
+          # Statically-linked x86_64 Linux (musl) — works on Alpine,
+          # distroless containers, old glibc hosts.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          # ARM64 Linux.
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          # ARM64 Linux musl.
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          # Intel macOS.
+          - target: x86_64-apple-darwin
+            os: macos-13
+            cross: false
+          # Apple Silicon macOS.
+          - target: aarch64-apple-darwin
+            os: macos-14
+            cross: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
+
+      - name: Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross == true
+        run: cargo install --locked cross
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --locked --target "${{ matrix.target }}"
+          else
+            cargo build --release --locked --target "${{ matrix.target }}"
+          fi
+
+      - name: Package archive
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.plan.outputs.version }}"
+          target="${{ matrix.target }}"
+          bin="target/${target}/release/mcp2cli"
+          stage="mcp2cli-${version}-${target}"
+          mkdir -p "$stage"
+          cp "$bin" "$stage/mcp2cli"
+          cp LICENSE "$stage/" 2>/dev/null || true
+          cp README.md "$stage/" 2>/dev/null || true
+          tar -cJf "${stage}.tar.xz" "$stage"
+          sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
+          echo "archive=${stage}.tar.xz"           >> "$GITHUB_OUTPUT"
+          echo "sha256=${stage}.tar.xz.sha256"     >> "$GITHUB_OUTPUT"
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.plan.outputs.tag }}" \
+            "${{ steps.pkg.outputs.archive }}" \
+            "${{ steps.pkg.outputs.sha256 }}" \
+            --clobber
+
+  checksums:
+    needs: [plan, build]
+    name: Publish SHA256SUMS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download per-archive sha256 files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cd artifacts
+          # Pull only the .sha256 sidecars so we can concat them.
+          gh release download "${{ needs.plan.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern '*.tar.xz.sha256'
+          cat *.tar.xz.sha256 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload aggregated SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.plan.outputs.tag }}" \
+            artifacts/SHA256SUMS \
+            --clobber

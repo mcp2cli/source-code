@@ -1,0 +1,85 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "release": {
+    "projects": ["mcp2cli"],
+    "releaseTagPattern": "v{version}",
+    "git": {
+      "commit": true,
+      "commitMessage": "chore(release): v{version}",
+      "tag": true,
+      "stageChanges": true
+    },
+    "version": {
+      "conventionalCommits": true,
+      "generatorOptions": {
+        "skipLockFileUpdate": true
+      },
+      "preVersionCommand": "",
+      "postVersionCommand": "node tools/release/post-version.mjs"
+    },
+    "releaseTagPatternCheckAllBranchesWhen": ["main", "next", "develop"],
+    "changelog": {
+      "automaticFromRef": true,
+      "workspaceChangelog": {
+        "file": "CHANGELOG.md",
+        "createRelease": "github",
+        "renderOptions": {
+          "authors": true,
+          "commitReferences": true,
+          "versionTitleDate": true
+        }
+      },
+      "projectChangelogs": false
+    },
+    "conventionalCommits": {
+      "types": {
+        "feat": {
+          "semverBump": "minor",
+          "changelog": { "title": "Features", "hidden": false }
+        },
+        "fix": {
+          "semverBump": "patch",
+          "changelog": { "title": "Fixes", "hidden": false }
+        },
+        "perf": {
+          "semverBump": "patch",
+          "changelog": { "title": "Performance", "hidden": false }
+        },
+        "refactor": {
+          "semverBump": "patch",
+          "changelog": { "title": "Refactors", "hidden": false }
+        },
+        "docs": {
+          "semverBump": "none",
+          "changelog": { "title": "Docs", "hidden": false }
+        },
+        "build": {
+          "semverBump": "none",
+          "changelog": { "title": "Build", "hidden": true }
+        },
+        "ci": {
+          "semverBump": "none",
+          "changelog": { "title": "CI", "hidden": true }
+        },
+        "chore": {
+          "semverBump": "none",
+          "changelog": { "title": "Chore", "hidden": true }
+        },
+        "style": {
+          "semverBump": "none",
+          "changelog": { "title": "Style", "hidden": true }
+        },
+        "test": {
+          "semverBump": "none",
+          "changelog": { "title": "Tests", "hidden": true }
+        },
+        "revert": {
+          "semverBump": "patch",
+          "changelog": { "title": "Reverts", "hidden": false }
+        }
+      }
+    }
+  },
+  "targetDefaults": {},
+  "parallel": 1
+}

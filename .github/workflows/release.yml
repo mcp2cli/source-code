@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no tag, no release, no commit)'
+        type: boolean
+        default: false
+      first_release:
+        description: 'First release (skip changelog from git history)'
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+      - develop
+      - next
+    # Filter out releases that are already in-flight (Nx bumps files,
+    # commits, and we don't want that commit to re-trigger us).
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'package.json'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'docs/files/llms-full.txt'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Branch → prerelease channel mapping:
+  #   develop → alpha
+  #   next    → beta
+  #   main    → stable (no preid)
+  plan:
+    name: Plan release channel
+    runs-on: ubuntu-latest
+    outputs:
+      preid: ${{ steps.channel.outputs.preid }}
+      dist_tag: ${{ steps.channel.outputs.dist_tag }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+    steps:
+      - id: channel
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            develop)
+              echo "preid=alpha"     >> "$GITHUB_OUTPUT"
+              echo "dist_tag=alpha"  >> "$GITHUB_OUTPUT"
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              ;;
+            next)
+              echo "preid=beta"      >> "$GITHUB_OUTPUT"
+              echo "dist_tag=beta"   >> "$GITHUB_OUTPUT"
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              ;;
+            main)
+              echo "preid="          >> "$GITHUB_OUTPUT"
+              echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+              echo "prerelease=false">> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "unsupported branch: ${GITHUB_REF_NAME}" >&2
+              exit 1
+              ;;
+          esac
+
+  release:
+    needs: plan
+    uses: tsok-org/.github/.github/workflows/nx-cd.yml@v1
+    with:
+      preid: ${{ needs.plan.outputs.preid }}
+      dist_tag: ${{ needs.plan.outputs.dist_tag }}
+      github_prerelease: ${{ fromJSON(needs.plan.outputs.prerelease) }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.dry_run) || false }}
+      first_release: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.first_release) || false }}
+      publish_docker: false
+      # Our Nx config runs `release:postversion` after the version bump,
+      # which syncs Cargo.toml + Cargo.lock + docs/files/llms-full.txt.
+      github_app_id: ${{ vars.OPERATOR_GITHUB_APPLICATION_ID }}
+    secrets:
+      github_app_private_key: ${{ secrets.OPERATOR_GITHUB_APP_PRIVATE_KEY }}
