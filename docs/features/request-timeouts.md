@@ -26,14 +26,14 @@ defaults:
 Override the config default for a single invocation:
 
 ```bash
-# Quick ping — 5 second timeout
-work --timeout 5 ping
+# Quick draft list — 5 second timeout
+email --timeout 5 draft list
 
 # Long-running operation — 10 minute timeout
-work --timeout 600 deploy --version 2.0
+email --timeout 600 search --query "from:boss"
 
 # Disable timeout entirely
-work --timeout 0 long-running-operation --heavy-input '...'
+email --timeout 0 search --query "has:attachment" --all
 ```
 
 ### Timeout Values
@@ -56,7 +56,7 @@ sequenceDiagram
     participant Client as MCP Client
     participant Server as MCP Server
 
-    User->>CLI: work --timeout 30 echo --message hi
+    User->>CLI: email --timeout 30 search --query hi
     CLI->>Context: timeout_override = Some(30)
     Context->>Context: resolve_timeout() → 30s
     Context->>Client: tokio::time::timeout(30s, perform(...))
@@ -90,13 +90,13 @@ Timeout is resolved in this order (first match wins):
 
 ```bash
 # Config says 60s, but this command uses 10s:
-work --timeout 10 ping
+email --timeout 10 draft list
 
 # Config says 60s, no flag → 60s:
-work echo --message hello
+email search --query "from:boss"
 
 # No config override, no flag → 120s (built-in default):
-mcp2cli --url http://localhost:3001/mcp echo --message hello
+mcp2cli --url https://mcp.example.com/email search --query "from:boss"
 ```
 
 ---
@@ -107,22 +107,22 @@ mcp2cli --url http://localhost:3001/mcp echo --message hello
 
 ```bash
 # CI health check — fail fast if server is down
-work --timeout 5 ping || echo "Server unreachable"
+email --timeout 5 labels list || echo "Server unreachable"
 ```
 
 ### Long-running data operations
 
 ```bash
-# Data export that might take minutes
-work --timeout 0 export --dataset full --format parquet
+# Mailbox-wide search that might take minutes
+email --timeout 0 search --query "has:attachment" --all
 ```
 
 ### Scripted retries with timeout
 
 ```bash
 for i in 1 2 3; do
-  if work --timeout 10 --json deploy --version "$VERSION" 2>/dev/null; then
-    echo "Deploy succeeded"
+  if email --timeout 10 --json send --to "$RECIPIENT" --subject "Report" --body "..." 2>/dev/null; then
+    echo "Send succeeded"
     break
   fi
   echo "Attempt $i timed out, retrying..."

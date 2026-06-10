@@ -27,14 +27,22 @@ graph TB
 
 ## Streamable HTTP
 
-Connects to a remote MCP server over HTTP with JSON-RPC request/response cycles and SSE (Server-Sent Events) for streaming.
+Connects to a remote MCP server over HTTP with JSON-RPC request/response cycles and SSE (Server-Sent Events) for streaming. Both `http` (handy for local development) and `https` (TLS via rustls, required for real or authenticated servers) endpoints are supported.
 
 ### Configuration
 
 ```yaml
 server:
   transport: streamable_http
-  endpoint: http://127.0.0.1:3001/mcp
+  endpoint: http://127.0.0.1:3001/mcp     # plain HTTP for local/dev
+```
+
+For a real or authenticated server, use an `https` endpoint so the connection is encrypted with TLS (rustls):
+
+```yaml
+server:
+  transport: streamable_http
+  endpoint: https://mcp.example.com/email  # TLS via rustls
 ```
 
 ### How It Works
@@ -50,7 +58,7 @@ server:
 Add an `Authorization` header automatically via `auth login`:
 
 ```bash
-work auth login
+email auth login
 # Prompted for token → stored in instances/<name>/tokens.json
 # All subsequent requests include the Authorization header
 ```

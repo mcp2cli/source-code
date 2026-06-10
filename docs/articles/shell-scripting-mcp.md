@@ -12,7 +12,7 @@ Every mcp2cli command supports `--json` output with a consistent envelope. This 
 
 ```json
 {
-  "app_id": "work",
+  "app_id": "email",
   "command": "invoke",
   "summary": "called echo",
   "lines": ["..."],
@@ -36,16 +36,16 @@ Every mcp2cli command supports `--json` output with a consistent envelope. This 
 
 ```bash
 # Tool names
-work --json ls --tools | jq -r '.data.items[].id'
+email --json ls --tools | jq -r '.data.items[].id'
 
 # Tool result content
-work --json echo --message hello | jq -r '.data.content[0].text'
+email --json echo --message hello | jq -r '.data.content[0].text'
 
 # Server health
-work --json doctor | jq '.data.server'
+email --json doctor | jq '.data.server'
 
 # Capability count
-TOOLS=$(work --json ls --tools | jq '.data.items | length')
+TOOLS=$(email --json ls --tools | jq '.data.items | length')
 echo "Server has $TOOLS tools"
 ```
 
@@ -53,7 +53,7 @@ echo "Server has $TOOLS tools"
 
 ```bash
 # Check if server is up
-if work --timeout 5 ping >/dev/null 2>&1; then
+if email --timeout 5 ping >/dev/null 2>&1; then
   echo "Server is up"
 else
   echo "Server is down"
@@ -61,8 +61,8 @@ else
 fi
 
 # Check if a specific tool exists
-if work --json ls --tools | jq -e '.data.items[] | select(.id == "deploy")' >/dev/null 2>&1; then
-  echo "Deploy tool available"
+if email --json ls --tools | jq -e '.data.items[] | select(.id == "send")' >/dev/null 2>&1; then
+  echo "Send tool available"
 fi
 ```
 
@@ -70,9 +70,9 @@ fi
 
 ```bash
 # Call every tool with a smoke test
-work --json ls --tools | jq -r '.data.items[].id' | while read tool; do
+email --json ls --tools | jq -r '.data.items[].id' | while read tool; do
   echo -n "Testing $tool... "
-  if work --json --timeout 10 "$tool" >/dev/null 2>&1; then
+  if email --json --timeout 10 "$tool" >/dev/null 2>&1; then
     echo "OK"
   else
     echo "FAIL"
@@ -84,8 +84,8 @@ done
 
 ```bash
 # Get resource list, then read each one
-work --json ls --resources | jq -r '.data.items[].id' | while read uri; do
-  work --json get "$uri" > "resources/$(echo $uri | tr '/:' '__').json"
+email --json ls --resources | jq -r '.data.items[].id' | while read uri; do
+  email --json get "$uri" > "resources/$(echo $uri | tr '/:' '__').json"
 done
 ```
 
@@ -143,7 +143,7 @@ FAIL=0
 test_tool() {
   local tool="$1"
   shift
-  if work --json --timeout 30 "$tool" "$@" >> "$LOG" 2>&1; then
+  if email --json --timeout 30 "$tool" "$@" >> "$LOG" 2>&1; then
     ((PASS++))
   else
     echo "FAIL: $tool" >> "$LOG"
@@ -159,8 +159,8 @@ test_tool ls --tools
 test_tool ls --resources
 
 # Core tools
-test_tool echo --message "nightly-test-$(date +%s)"
-test_tool add --a 7 --b 13
+test_tool search --query "nightly-test-$(date +%s)"
+test_tool draft.list
 test_tool ping
 
 # Report
@@ -189,22 +189,22 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 ```bash
 # Development
 export MCP2CLI_CONFIG_DIR=./configs/dev
-work deploy --version 1.0
+email send --to dev@example.com --subject "Build 1.0"
 
 # Staging  
 export MCP2CLI_CONFIG_DIR=./configs/staging
-work deploy --version 1.0
+email send --to staging@example.com --subject "Build 1.0"
 
 # Production
 export MCP2CLI_CONFIG_DIR=./configs/prod
-work deploy --version 1.0
+email send --to prod@example.com --subject "Build 1.0"
 ```
 
 ### Dynamic Endpoint Override
 
 ```bash
 # Point config at a different server without changing config files
-MCP2CLI_SERVER__ENDPOINT=https://canary.api/mcp work --json doctor
+MCP2CLI_SERVER__ENDPOINT=https://canary.api/mcp email --json doctor
 ```
 
 ### Secret Injection
@@ -254,7 +254,7 @@ For real-time pipelines, use NDJSON output:
 
 ```bash
 # Stream events to a log aggregator
-work --output ndjson ls 2>/dev/null | \
+email --output ndjson ls 2>/dev/null | \
   while IFS= read -r line; do
     echo "$line" | curl -s -X POST http://log-aggregator/ingest -d @-
   done
@@ -286,13 +286,13 @@ retry() {
 }
 
 # Usage
-retry work --timeout 30 deploy --version 2.0
+retry email --timeout 30 send --to user@example.com --subject "Build 2.0"
 ```
 
 ### Capture and Parse Errors
 
 ```bash
-OUTPUT=$(work --json echo --message hello 2>&1)
+OUTPUT=$(email --json echo --message hello 2>&1)
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
@@ -309,9 +309,9 @@ fi
 
 ```bash
 # Run multiple commands in parallel
-work --json --timeout 30 tool-a --arg x &
-work --json --timeout 30 tool-b --arg y &
-work --json --timeout 30 tool-c --arg z &
+email --json --timeout 30 tool-a --arg x &
+email --json --timeout 30 tool-b --arg y &
+email --json --timeout 30 tool-c --arg z &
 wait
 echo "All commands completed"
 ```
@@ -319,8 +319,8 @@ echo "All commands completed"
 For many parallel commands, use GNU `parallel`:
 
 ```bash
-work --json ls --tools | jq -r '.data.items[].id' | \
-  parallel -j4 "work --json --timeout 30 {} 2>/dev/null > /tmp/results/{}.json"
+email --json ls --tools | jq -r '.data.items[].id' | \
+  parallel -j4 "email --json --timeout 30 {} 2>/dev/null > /tmp/results/{}.json"
 ```
 
 ---

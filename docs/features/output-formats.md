@@ -11,13 +11,13 @@ Every mcp2cli command supports three output formats — human-readable text, JSO
 Optimized for terminal readability:
 
 ```bash
-work ls
+email ls
 ```
 
 ```text
-echo          tool      Echoes back the input string
-add           tool      Adds two numbers
-readme        resource  demo://resource/readme.md
+send          tool      Send an email message
+reply         tool      Reply to a thread
+inbox         resource  mail://inbox
 simple-prompt prompt    A simple prompt with no arguments
 ```
 
@@ -26,23 +26,23 @@ simple-prompt prompt    A simple prompt with no arguments
 Structured envelope for programmatic parsing:
 
 ```bash
-work --json ls
+email --json ls
 ```
 
 ```json
 {
-  "app_id": "work",
+  "app_id": "email",
   "command": "discover",
   "summary": "discovered 14 capabilities",
   "lines": [
-    "echo    tool    Echoes back the input string",
-    "add     tool    Adds two numbers"
+    "send    tool    Send an email message",
+    "reply   tool    Reply to a thread"
   ],
   "data": {
     "category": "capabilities",
     "items": [
-      { "id": "echo", "kind": "tool", "summary": "Echoes back the input string" },
-      { "id": "add", "kind": "tool", "summary": "Adds two numbers" }
+      { "id": "send", "kind": "tool", "summary": "Send an email message" },
+      { "id": "reply", "kind": "tool", "summary": "Reply to a thread" }
     ]
   }
 }
@@ -53,11 +53,11 @@ work --json ls
 Newline-delimited JSON — one JSON object per line:
 
 ```bash
-work --output ndjson ls
+email --output ndjson ls
 ```
 
 ```json
-{"app_id":"work","command":"discover","summary":"discovered 14 capabilities","lines":[...],"data":{...}}
+{"app_id":"email","command":"discover","summary":"discovered 14 capabilities","lines":[...],"data":{...}}
 ```
 
 Best for streaming pipelines and log ingestion.
@@ -69,11 +69,11 @@ Best for streaming pipelines and log ingestion.
 ### CLI Flags
 
 ```bash
-work --json ls                    # JSON
-work --output json ls             # Same as --json
-work --output ndjson ls           # NDJSON
-work --output human ls            # Explicit human
-work ls                           # Human (default)
+email --json ls                   # JSON
+email --output json ls            # Same as --json
+email --output ndjson ls          # NDJSON
+email --output human ls           # Explicit human
+email ls                          # Human (default)
 ```
 
 ### Config Default
@@ -95,9 +95,9 @@ Every JSON response follows a consistent envelope:
 
 ```json
 {
-  "app_id": "work",           // Config name or alias
+  "app_id": "email",          // Config name or alias
   "command": "invoke",         // Operation type
-  "summary": "called echo",   // Human-readable summary
+  "summary": "called send",   // Human-readable summary
   "lines": ["..."],           // Human-format lines (for compatibility)
   "data": { ... }             // Command-specific structured data
 }
@@ -107,22 +107,22 @@ Every JSON response follows a consistent envelope:
 
 ```bash
 # List tool names
-work --json ls --tools | jq -r '.data.items[].id'
+email --json ls --tools | jq -r '.data.items[].id'
 
-# Get echo result content
-work --json echo --message hello | jq '.data.content'
+# Get send result content
+email --json send --to user@example.com --subject "Hi" --body "..." | jq '.data.content'
 
 # Check server health
-work --json doctor | jq '.data.server'
+email --json doctor | jq '.data.server'
 
 # Get auth state
-work --json auth status | jq '.data.auth_session.state'
+email --json auth status | jq '.data.auth_session.state'
 
 # Count capabilities
-work --json ls | jq '.data.items | length'
+email --json ls | jq '.data.items | length'
 
 # Filter tools by name
-work --json ls | jq '[.data.items[] | select(.id | test("email"))]'
+email --json ls | jq '[.data.items[] | select(.id | test("draft"))]'
 ```
 
 ---
@@ -133,19 +133,19 @@ JSON output makes mcp2cli a first-class citizen in shell pipelines:
 
 ```bash
 # Store result for later use
-RESULT=$(work --json echo --message hello)
+RESULT=$(email --json send --to user@example.com --subject "Hi" --body "hello")
 echo "$RESULT" | jq '.data.content[0].text'
 
 # Chain operations
-work --json ls --tools | jq -r '.data.items[].id' | while read tool; do
+email --json ls --tools | jq -r '.data.items[].id' | while read tool; do
   echo "Testing: $tool"
-  work --json "$tool" --help 2>/dev/null || true
+  email --json "$tool" --help 2>/dev/null || true
 done
 
 # Compare before/after
-BEFORE=$(work --json ls | jq '.data.items | length')
+BEFORE=$(email --json ls | jq '.data.items | length')
 # ... do something ...
-AFTER=$(work --json ls | jq '.data.items | length')
+AFTER=$(email --json ls | jq '.data.items | length')
 echo "Tools changed: $BEFORE → $AFTER"
 ```
 

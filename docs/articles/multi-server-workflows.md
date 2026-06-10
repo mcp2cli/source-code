@@ -48,7 +48,7 @@ mcp2cli link create --name infra
 # Notification server
 mcp2cli config init --name notify --transport stdio \
   --stdio-command ./notify-server \
-  --stdio-args '--config=prod.yaml'
+  --stdio-arg '--config=prod.yaml'
 mcp2cli link create --name notify
 
 # Search server

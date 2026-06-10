@@ -19,7 +19,7 @@ auto-discovered and become the CLI:
 - Each server **tool** → a subcommand with typed `--flags` from JSON Schema
 - Each server **resource** → accessible via `get <URI>` (concrete) or a parameterised command (template)
 - Each server **prompt** → a subcommand with typed flags from argument metadata
-- Dotted tool names (`email.send`) → nested subcommands (`work email send`)
+- Dotted tool names (`draft.create`) → nested subcommands (`email draft create`)
 
 ---
 
@@ -54,20 +54,20 @@ mcp2cli --stdio "npx @modelcontextprotocol/server-everything" echo --message hel
 
 ```bash
 # Create config
-mcp2cli config init --name work \
+mcp2cli config init --name email \
   --transport streamable_http \
-  --endpoint http://127.0.0.1:3001/mcp
+  --endpoint https://mcp.example.com/email
 
 # Create symlink alias + man page
-mcp2cli link create --name work
-# → creates ~/.local/bin/work (symlink) and ~/.local/share/man/man1/work.1
+mcp2cli link create --name email
+# → creates ~/.local/bin/email (symlink) and ~/.local/share/man/man1/email.1
 
 # Use alias as standalone app
-work ls
-work echo --message hello
-work get demo://resource/file.md
-work doctor
-man work
+email ls
+email send --to user@example.com --subject "Hi" --body "Hello"
+email get mail://inbox
+email doctor
+man email
 ```
 
 ---
@@ -99,8 +99,8 @@ mcp2cli link create --name prod
 
 ```bash
 mcp2cli config list                     # list all named configs
-mcp2cli config show --name work         # show resolved settings
-mcp2cli use work                        # set active config
+mcp2cli config show --name email        # show resolved settings
+mcp2cli use email                       # set active config
 mcp2cli use --show                      # show active config
 mcp2cli use --clear                     # clear active config
 ```
@@ -229,83 +229,83 @@ They connect to the configured MCP server.
 ### Discovery
 
 ```bash
-work ls                          # list all capabilities
-work ls --tools                  # tools only
-work ls --resources              # resources only
-work ls --prompts                # prompts only
-work ls --filter pattern         # filter by name/description
-work ls --limit 10               # paginate
-work ls --cursor TOKEN           # next page
-work ls --all                    # all pages
+email ls                          # list all capabilities
+email ls --tools                  # tools only
+email ls --resources              # resources only
+email ls --prompts                # prompts only
+email ls --filter pattern         # filter by name/description
+email ls --limit 10               # paginate
+email ls --cursor TOKEN           # next page
+email ls --all                    # all pages
 ```
 
 ### Tools (verbs)
 
 ```bash
-work TOOL-NAME [--FLAG VALUE]...   # call a tool
-work TOOL-NAME --help              # show tool help
-work TOOL-NAME --background        # run as background job
-work TOOL-NAME --args-file FILE    # load arguments from JSON file
-work TOOL-NAME --args-json JSON    # inline JSON arguments
-work TOOL-NAME --timeout SECS      # per-request timeout override
+email TOOL-NAME [--FLAG VALUE]...   # call a tool
+email TOOL-NAME --help              # show tool help
+email TOOL-NAME --background        # run as background job
+email TOOL-NAME --args-file FILE    # load arguments from JSON file
+email TOOL-NAME --args-json JSON    # inline JSON arguments
+email TOOL-NAME --timeout SECS      # per-request timeout override
 ```
 
 Dotted names become nested subcommands:
 ```bash
-work email send --to user@example.com --body "Hello"
-work email draft create --subject "Test"
+email send --to user@example.com --body "Hello"
+email draft create --subject "Test"
 ```
 
 ### Resources (nouns)
 
 ```bash
-work get URI                       # read a concrete resource
-work TEMPLATE-COMMAND [ARGS]       # resource template as command
+email get URI                      # read a concrete resource
+email TEMPLATE-COMMAND [ARGS]      # resource template as command
 ```
 
 ### Prompts (workflows)
 
 ```bash
-work PROMPT-NAME [--FLAG VALUE]... # run a prompt
+email PROMPT-NAME [--FLAG VALUE]... # run a prompt
 ```
 
 ### Health & diagnostics
 
 ```bash
-work ping                          # liveness check with latency
-work doctor                        # connection + capability diagnostics
-work inspect                       # full capability dump
+email ping                         # liveness check with latency
+email doctor                       # connection + capability diagnostics
+email inspect                      # full capability dump
 ```
 
 ### Background jobs
 
 ```bash
-work TOOL --background             # submit as background job
-work jobs list                     # list all jobs
-work jobs show --id ID             # show job details
-work jobs wait --id ID             # wait for completion
-work jobs wait --latest            # wait for most recent job
-work jobs cancel --id ID           # request cancellation
-work jobs cancel --latest          # cancel most recent
-work jobs watch --id ID            # stream live status updates
-work jobs watch --latest           # watch most recent
+email TOOL --background            # submit as background job
+email jobs list                    # list all jobs
+email jobs show --id ID            # show job details
+email jobs wait --id ID            # wait for completion
+email jobs wait --latest           # wait for most recent job
+email jobs cancel --id ID          # request cancellation
+email jobs cancel --latest         # cancel most recent
+email jobs watch --id ID           # stream live status updates
+email jobs watch --latest          # watch most recent
 ```
 
 ### Authentication
 
 ```bash
-work auth login                    # start OAuth login flow
-work auth logout                   # clear stored tokens
-work auth status                   # show auth state
+email auth login                   # start OAuth login flow
+email auth logout                  # clear stored tokens
+email auth status                  # show auth state
 ```
 
 ### Subscriptions & events
 
 ```bash
-work subscribe URI                 # subscribe to resource changes
-work unsubscribe URI               # unsubscribe
-work log LEVEL                     # set server log level (debug|info|warn|error)
-work complete REF NAME ARG         # tab-completion from server
+email subscribe URI                # subscribe to resource changes
+email unsubscribe URI              # unsubscribe
+email log LEVEL                    # set server log level (debug|info|warn|error)
+email complete REF NAME ARG        # tab-completion from server
 ```
 
 ---
@@ -319,13 +319,13 @@ Default can be set per config with `defaults.output`.
 
 ```json
 {
-  "app_id": "work",
+  "app_id": "email",
   "command": "invoke",
-  "summary": "called echo",
-  "lines": ["Echo: hello world"],
+  "summary": "called send",
+  "lines": ["Sent message to user@example.com"],
   "data": {
     "content": [
-      { "type": "text", "text": "hello world" }
+      { "type": "text", "text": "Sent message to user@example.com" }
     ]
   }
 }
@@ -335,19 +335,19 @@ Default can be set per config with `defaults.output`.
 
 ```bash
 # List all tool names
-work --json ls | jq '[.data.items[] | select(.kind=="tool") | .id]'
+email --json ls | jq '[.data.items[] | select(.kind=="tool") | .id]'
 
 # Get text from tool call result
-work --json echo --message hi | jq '.data.content[0].text'
+email --json search --query "from:boss" | jq '.data.content[0].text'
 
 # Health check data
-work --json doctor | jq '.data.server'
+email --json doctor | jq '.data.server'
 
 # Latest job status
-work --json jobs list | jq '.data.jobs[-1]'
+email --json jobs list | jq '.data.jobs[-1]'
 
 # Discovery: extract id + description
-work --json ls | jq '.data.items[] | {id, summary}'
+email --json ls | jq '.data.items[] | {id, summary}'
 ```
 
 ---
@@ -398,7 +398,7 @@ profile:
   resource_verb: fetch               # "fetch URI" instead of "get URI"
 ```
 
-After editing the config, run `mcp2cli link create --name work --force` to
+After editing the config, run `mcp2cli link create --name email --force` to
 also refresh the alias man page with the updated surface.
 
 ---
@@ -462,9 +462,9 @@ The daemon keeps an MCP session alive in the background so subsequent
 invocations skip cold-start connection overhead.
 
 ```bash
-mcp2cli daemon start --name work   # connect once; stay running
-work echo --message hello           # uses warm session (low latency)
-mcp2cli daemon stop  --name work   # disconnect
+mcp2cli daemon start --name email  # connect once; stay running
+email send --to user@example.com --subject "Hi" --body "Hello"  # uses warm session (low latency)
+mcp2cli daemon stop  --name email  # disconnect
 ```
 
 ---
@@ -475,9 +475,9 @@ Full OAuth2 PKCE flow for servers that require authentication.
 Tokens are stored in `~/.local/share/mcp2cli/instances/<name>/tokens.json`.
 
 ```bash
-work auth login          # opens browser, completes flow
-work auth status         # inspect stored session
-work auth logout         # clear tokens
+email auth login         # opens browser, completes flow
+email auth status        # inspect stored session
+email auth logout        # clear tokens
 ```
 
 ---
@@ -509,16 +509,16 @@ Events are written locally to `~/.local/share/mcp2cli/telemetry.ndjson`.
 
 ```bash
 mcp2cli man install              # install/refresh mcp2cli(1)
-mcp2cli link create --name work  # creates work(1) + refreshes mcp2cli(1)
+mcp2cli link create --name email # creates email(1) + refreshes mcp2cli(1)
 man mcp2cli                      # read host man page
-man work                         # read alias man page
+man email                        # read alias man page
 
 # Custom location
 mcp2cli man install --dir /usr/local/share/man/man1
-mcp2cli link create --name work --man-dir /usr/local/share/man/man1
+mcp2cli link create --name email --man-dir /usr/local/share/man/man1
 
 # Skip man page for an alias
-mcp2cli link create --name work --no-man
+mcp2cli link create --name email --no-man
 ```
 
 Alias man pages include: NAME, SYNOPSIS, DESCRIPTION, GLOBAL OPTIONS,
@@ -543,8 +543,8 @@ RUST_LOG                 tracing filter, e.g. mcp2cli=debug
 Config fields can also be overridden with `MCP2CLI_` prefix + `__` separator:
 
 ```bash
-MCP2CLI_LOGGING__LEVEL=debug work ls
-MCP2CLI_DEFAULTS__TIMEOUT_SECONDS=30 work long-operation
+MCP2CLI_LOGGING__LEVEL=debug email ls
+MCP2CLI_DEFAULTS__TIMEOUT_SECONDS=30 email send --to user@example.com --subject "Hi" --body "Hello"
 ```
 
 ---
@@ -573,7 +573,7 @@ MCP2CLI_DEFAULTS__TIMEOUT_SECONDS=30 work long-operation
 | `'X' is reserved` | Name is a host command | Choose different name |
 | `server.endpoint must be set` | HTTP transport, no endpoint | Add `--endpoint URL` |
 | `validation error: required argument` | Required flag missing | Add the missing `--flag` |
-| `unknown command 'X'` + suggestions | Mistyped command | Check `work ls` and suggestions |
+| `unknown command 'X'` + suggestions | Mistyped command | Check `email ls` and suggestions |
 | `live discovery failed; returned cached` | Server unreachable | Start server or use cached data offline |
 
 ---

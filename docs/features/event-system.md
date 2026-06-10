@@ -65,8 +65,8 @@ Payload:
 ```json
 {
   "type": "progress",
-  "app_id": "work",
-  "message": "Deploying: 45% complete",
+  "app_id": "email",
+  "message": "Sending: 45% complete",
   "data": {
     "progress": 0.45,
     "total": 1.0
@@ -88,8 +88,8 @@ events:
 Each event is one JSON line:
 
 ```json
-{"type":"progress","app_id":"work","message":"Deploying: 45%","data":{}}
-{"type":"info","app_id":"work","message":"Deploy complete","data":{}}
+{"type":"progress","app_id":"email","message":"Sending: 45%","data":{}}
+{"type":"info","app_id":"email","message":"Send complete","data":{}}
 ```
 
 Use cases: local monitoring tools, IPC with other services, real-time dashboards.
@@ -110,9 +110,9 @@ curl -N http://127.0.0.1:9091/events
 ```
 
 ```yaml
-data: {"type":"progress","app_id":"work","message":"45%"}
+data: {"type":"progress","app_id":"email","message":"45%"}
 
-data: {"type":"info","app_id":"work","message":"Done"}
+data: {"type":"info","app_id":"email","message":"Done"}
 ```
 
 Use cases: web UIs, browser-based monitoring, real-time event feeds.
@@ -203,8 +203,8 @@ MCP server notifications are automatically mapped to events:
 curl -sN http://127.0.0.1:9091/events | jq --unbuffered '.'
 
 # Run commands in another terminal
-work deploy --version 2.0 --background
-work jobs watch --latest
+email send --to user@example.com --subject "Report" --body "..." --background
+email jobs watch --latest
 ```
 
 ### Log to file

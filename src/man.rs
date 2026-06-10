@@ -451,7 +451,7 @@ No configuration needed. Useful for quick exploration and CI scripts.",
         &mut out,
         "Create a named config (\\fBmcp2cli config init\\fR), then create a symlink alias \
 (\\fBmcp2cli link create\\fR). The alias behaves as a standalone application for \
-that server: \\fBwork ls\\fR, \\fBprod doctor\\fR, \\fBstaging deploy\\fR.",
+that server: \\fBemail ls\\fR, \\fBgithub doctor\\fR, \\fBcalendar list\\fR.",
     );
     ln(&mut out, ".PP");
     ln(
@@ -827,15 +827,15 @@ across every command:",
 
     ln(&mut out, ".SS Named config + alias");
     ln(&mut out, ".nf");
-    ln(&mut out, "mcp2cli config init --name work \\\\");
+    ln(&mut out, "mcp2cli config init --name email \\\\");
     ln(&mut out, "  --transport streamable_http \\\\");
-    ln(&mut out, "  --endpoint http://127.0.0.1:3001/mcp");
+    ln(&mut out, "  --endpoint https://mcp.example.com/email");
     ln(&mut out, "");
-    ln(&mut out, "mcp2cli link create --name work");
+    ln(&mut out, "mcp2cli link create --name email");
     ln(&mut out, "");
-    ln(&mut out, "work ls");
-    ln(&mut out, "work echo --message hello");
-    ln(&mut out, "work --json doctor | jq '.data.server'");
+    ln(&mut out, "email ls");
+    ln(&mut out, "email send --to user@example.com --subject Hi");
+    ln(&mut out, "email --json doctor | jq '.data.server'");
     ln(&mut out, ".fi");
 
     ln(&mut out, ".SS Multi-server setup");
@@ -1139,19 +1139,19 @@ mod tests {
 
     #[test]
     fn generate_http_no_manifest() {
-        let config = http_config("work", "http://localhost:3001/mcp");
+        let config = http_config("email", "http://localhost:3001/mcp");
         let ctx = ManPageContext {
-            name: "work",
+            name: "email",
             config: &config,
             manifest: None,
         };
         let page = generate(&ctx);
 
         // Title header
-        assert!(page.contains(".TH WORK 1"), "missing title header");
+        assert!(page.contains(".TH EMAIL 1"), "missing title header");
         // NAME section
         assert!(page.contains(".SH NAME"), "missing NAME section");
-        assert!(page.contains("work \\- "), "missing name line");
+        assert!(page.contains("email \\- "), "missing name line");
         // Transport
         assert!(
             page.contains("Streamable HTTP"),

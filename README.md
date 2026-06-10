@@ -6,9 +6,9 @@ Server tools become verbs. Resources become nouns. Prompts become workflows. No 
 
 ```bash
 # One binary. Any server. Real CLI commands.
-work echo --message "hello world"
-work email send --to user@example.com --body "Meeting at 3"
-work get file:///project/README.md
+email ls
+email send --to user@example.com --subject "Hi" --body "Meeting at 3"
+email get mail://inbox
 staging deploy --version 2.1.0 --background
 prod --json doctor | jq '.data.server'
 ```
@@ -55,17 +55,22 @@ mcp2cli --stdio "npx @modelcontextprotocol/server-everything" ls
 
 ```bash
 # Create a config
-mcp2cli config init --name work --app bridge \
-  --transport streamable_http --endpoint http://127.0.0.1:3001/mcp
+mcp2cli config init --name email --app bridge \
+  --transport streamable_http --endpoint https://mcp.example.com/email
 
 # Create a symlink alias
-mcp2cli link create --name work
+mcp2cli link create --name email
+
+# Authenticate (the email server needs a bearer token)
+email auth login
 
 # Use it like a standalone app
-work ls                           # Discover capabilities
-work echo --message hello         # Call a tool
-work get demo://resource/readme   # Read a resource
-work doctor                       # Health check
+email ls                                      # Discover capabilities
+email send --to user@example.com \
+  --subject "Hi" --body "Meeting at 3"        # Call a tool
+email search --query "from:boss"              # Search the mailbox
+email get mail://inbox                        # Read a resource
+email doctor                                  # Health check
 ```
 
 ### Option C: Demo mode — no server needed
@@ -110,10 +115,10 @@ mcp2cli discovers → builds manifest → generates CLI → parses input → exe
 Dotted tool names automatically become nested subcommands:
 
 ```bash
-# Server tools: email.send, email.reply, email.draft.create
-work email send --to user@example.com --body "Hello"
-work email reply --thread-id 123
-work email draft create --subject "New draft"
+# Server tools: send, reply, draft.create
+email send --to user@example.com --subject "Hi" --body "Hello"
+email reply --thread-id 123 --body "Thanks"
+email draft create --subject "New draft"
 ```
 
 ---
@@ -123,7 +128,7 @@ work email draft create --subject "New draft"
 ### Core
 
 - **[Discovery-driven CLI](docs/features/discovery-driven-cli.md)** — server capabilities auto-generate typed CLI commands with `--flags` from JSON Schema
-- **[Named configs & aliases](docs/features/named-configs-and-aliases.md)** — `mcp2cli use <name>`, symlink aliases (`work`, `prod`, `staging`), dispatch routing
+- **[Named configs & aliases](docs/features/named-configs-and-aliases.md)** — `mcp2cli use <name>`, symlink aliases (`email`, `prod`, `staging`), dispatch routing
 - **[Profile overlays](docs/features/profile-overlays.md)** — rename, hide, group, alias commands; rename flags; change resource verbs
 - **[Ad-hoc connections](docs/features/ad-hoc-connections.md)** — `--url` and `--stdio` for config-free, zero-setup usage
 - **[Fuzzy matching](docs/features/fuzzy-matching.md)** — "Did you mean?" suggestions for mistyped commands
@@ -194,25 +199,25 @@ Every command supports structured JSON output:
 
 ```bash
 # JSON envelope
-work --json ls | jq '.data.items[].id'
+email --json ls | jq '.data.items[].id'
 
 # Tool result
-work --json echo --message hello | jq '.data.content[0].text'
+email --json send --to user@example.com --subject "Hi" --body "Hello" | jq '.data.content[0].text'
 
 # Health check data
-work --json doctor | jq '.data.server'
+email --json doctor | jq '.data.server'
 
 # Machine-readable discovery
-work --json ls --tools | jq '[.data.items[] | {id, kind, summary}]'
+email --json ls --tools | jq '[.data.items[] | {id, kind, summary}]'
 ```
 
 Consistent envelope format:
 
 ```json
 {
-  "app_id": "work",
+  "app_id": "email",
   "command": "invoke",
-  "summary": "called echo",
+  "summary": "called send",
   "lines": ["..."],
   "data": { "content": [...] }
 }

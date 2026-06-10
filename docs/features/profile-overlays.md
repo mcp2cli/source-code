@@ -9,9 +9,9 @@ Customize how server capabilities appear in the CLI — rename commands, hide in
 A **profile overlay** is an optional YAML section in your config that transforms the auto-generated CLI surface:
 
 ```yaml
-# In your config YAML (e.g., configs/work.yaml)
+# In your config YAML (e.g., configs/email.yaml)
 profile:
-  display_name: "Work CLI"
+  display_name: "Email CLI"
   aliases:
     long-running-operation: lro         # Rename a command
     get-tiny-image: image
@@ -46,8 +46,8 @@ profile:
     get-tiny-image: image
 ```
 
-**Before:** `work long-running-operation --duration 60`
-**After:** `work lro --duration 60`
+**Before:** `email long-running-operation --duration 60`
+**After:** `email lro --duration 60`
 
 For grouped commands, use dot notation:
 
@@ -86,7 +86,7 @@ profile:
       - user-delete
 ```
 
-This creates `work mail send`, `work mail reply`, etc. regardless of the original tool names.
+This creates `email mail send`, `email mail reply`, etc. regardless of the original tool names.
 
 ### Flag Aliases
 
@@ -110,8 +110,8 @@ profile:
   resource_verb: fetch                  # "get" → "fetch"
 ```
 
-**Before:** `work get demo://resource/readme.md`
-**After:** `work fetch demo://resource/readme.md`
+**Before:** `email get demo://resource/readme.md`
+**After:** `email fetch demo://resource/readme.md`
 
 ### Display Name
 
@@ -150,7 +150,7 @@ The overlay is applied **after** the manifest is built from discovery, transform
 Given a server with these tools:
 
 ```text
-email.send, email.reply, email.draft.create, labels.add,
+send, reply, draft.create, labels.add,
 get-tiny-image, long-running-operation, debug-internal, echo
 ```
 
@@ -174,14 +174,14 @@ profile:
 The CLI becomes:
 
 ```bash
-work email send --to user@example.com    # Grouped by dot notation
-work email reply --thread-id 123
-work email draft create --subject "New"
-work labels add --name urgent
-work image                                # Aliased from get-tiny-image
-work lro --duration 60                    # Aliased from long-running-operation
-work ping --msg hello                     # Aliased echo→ping, flag message→msg
-work fetch demo://resource/readme.md      # resource_verb changed to fetch
+email send --to user@example.com         # Tool: send
+email reply --thread-id 123              # Tool: reply
+email draft create --subject "New"       # Grouped by dot notation
+email labels add --name urgent           # Grouped by dot notation
+email image                               # Aliased from get-tiny-image
+email lro --duration 60                   # Aliased from long-running-operation
+email ping --msg hello                    # Aliased echo→ping, flag message→msg
+email fetch demo://resource/readme.md     # resource_verb changed to fetch
 # debug-internal is hidden from help/ls
 ```
 

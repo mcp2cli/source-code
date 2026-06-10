@@ -13,7 +13,7 @@ sequenceDiagram
     participant Cache as Discovery Cache
     participant Server as MCP Server
 
-    User->>mcp2cli: work echo --message hello
+    User->>mcp2cli: local echo --message hello
     mcp2cli->>Cache: Check cached inventory
     alt Cache hit
         Cache-->>mcp2cli: Cached tools, resources, prompts
@@ -65,25 +65,24 @@ Dotted tool names automatically become nested subcommands:
 
 ```text
 Server tools:
-  email.send
-  email.reply
-  email.draft.create
+  send
+  reply
+  draft.create
   labels.add
 
 CLI becomes:
-  work email send --to user@example.com --body "Hello"
-  work email reply --thread-id 123 --body "Thanks"
-  work email draft create --subject "New draft"
-  work labels add --name urgent --color red
+  email send --to user@example.com --body "Hello"
+  email reply --thread-id 123 --body "Thanks"
+  email draft create --subject "New draft"
+  email labels add --name urgent --color red
 ```
 
 ```mermaid
 graph LR
-    A["email.send"] --> B["email"]
-    C["email.reply"] --> B
-    D["email.draft.create"] --> E["email draft"]
-    B --> F["work"]
-    E --> B
+    A["send"] --> F["email"]
+    C["reply"] --> F
+    D["draft.create"] --> E["draft"]
+    E --> F
     G["labels.add"] --> H["labels"]
     H --> F
 ```
@@ -96,10 +95,10 @@ URI templates like `user://profile/{user_id}` become parameterized commands:
 
 ```bash
 # Single parameter → positional argument
-work mail-search "invoices 2026"
+email mail-search "invoices 2026"
 
 # Multiple parameters → typed flags
-work user-profile --user-id 42 --format json
+email user-profile --user-id 42 --format json
 ```
 
 ---
@@ -116,7 +115,7 @@ Discovery results are cached in `~/.local/share/mcp2cli/instances/<name>/discove
 Force a live re-discovery:
 
 ```bash
-work ls    # Uses cache if fresh; re-discovers if stale
+email ls    # Uses cache if fresh; re-discovers if stale
 ```
 
 ---

@@ -214,7 +214,7 @@ pub fn parse_host_cli(
         .bin_name(invoked_as)
         .version(env!("CARGO_PKG_VERSION"))
         .after_help(
-            "Examples:\n  mcp2cli config init --name work --app bridge --endpoint https://demo.invalid/mcp\n  mcp2cli config init --name local --app bridge --transport stdio --stdio-command npx --stdio-arg @modelcontextprotocol/server-everything\n  mcp2cli use work\n  mcp2cli use --show\n  mcp2cli use --clear\n  mcp2cli tool call echo --arg message=hello\n  mcp2cli jobs list\n  mcp2cli work tool call echo --arg message=hello",
+            "Examples:\n  mcp2cli config init --name email --app bridge --endpoint https://mcp.example.com/email\n  mcp2cli config init --name local --app bridge --transport stdio --stdio-command npx --stdio-arg @modelcontextprotocol/server-everything\n  mcp2cli use email\n  mcp2cli use --show\n  mcp2cli use --clear\n  mcp2cli tool call send --arg to=user@example.com\n  mcp2cli jobs list\n  mcp2cli email tool call send --arg to=user@example.com",
         );
     let matches = command.try_get_matches_from_mut(argv.to_vec())?;
     HostCli::from_arg_matches(&matches)

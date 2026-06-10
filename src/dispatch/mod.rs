@@ -15,10 +15,10 @@
 //!
 //! # The alias/symlink story
 //!
-//! `mcp2cli link create --name work` installs a `work` symlink next
-//! to the `mcp2cli` binary. Invoking `work ls` is equivalent to
-//! `mcp2cli --config <work-config> ls` — [`Invocation::capture`]
-//! extracts `work` from `argv[0]`'s file stem and
+//! `mcp2cli link create --name email` installs an `email` symlink next
+//! to the `mcp2cli` binary. Invoking `email ls` is equivalent to
+//! `mcp2cli --config <email-config> ls` — [`Invocation::capture`]
+//! extracts `email` from `argv[0]`'s file stem and
 //! [`resolve_invocation`] matches it against known configs.
 //!
 //! # The shim story

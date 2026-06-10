@@ -51,7 +51,7 @@ graph LR
 # Stdio server
 mcp2cli config init --name dev --app bridge --transport stdio \
   --stdio-command npx \
-  --stdio-args '@modelcontextprotocol/server-everything'
+  --stdio-arg '@modelcontextprotocol/server-everything'
 
 # HTTP server
 mcp2cli config init --name staging --app bridge \
@@ -131,7 +131,7 @@ By default, symlinks are created next to the mcp2cli binary. Place them elsewher
 
 ```bash
 mcp2cli link create --name dev --dir /usr/local/bin
-mcp2cli link create --name work --dir ~/bin
+mcp2cli link create --name email --dir ~/bin
 ```
 
 ### Reserved Names
@@ -236,7 +236,7 @@ mcp2cli config list
 
 ```bash
 # Base config + environment override
-MCP2CLI_SERVER__ENDPOINT=https://canary.api/mcp work deploy --version 2.0
+MCP2CLI_SERVER__ENDPOINT=https://mcp.example.com/email email send --to user@example.com --subject "Hi" --body "..."
 ```
 
 ### Config Validation

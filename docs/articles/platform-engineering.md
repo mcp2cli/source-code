@@ -53,7 +53,7 @@ mcp2cli link create --name cloud
 
 # Database
 mcp2cli config init --name db --transport stdio \
-  --stdio-command ./db-mcp-server --stdio-args '--config=prod.yaml'
+  --stdio-command ./db-mcp-server --stdio-arg '--config=prod.yaml'
 mcp2cli link create --name db
 
 # Monitoring

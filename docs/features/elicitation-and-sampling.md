@@ -112,9 +112,11 @@ This tells the server it can send elicitation and sampling requests.
 
 In scripts and CI/CD, elicitation and sampling prompts block forever waiting for input. Solutions:
 
-1. **Pipe input:** `echo "value" | work tool-that-elicits`
-2. **Use `--timeout`:** `work --timeout 30 tool-that-elicits` — fails after 30s if blocked
-3. **Server-side:** Configure the server to skip elicitation for automated clients
+1. **Pre-supply answers with `--input-json`:** `email --input-json '{"subject":"Hi","body":"..."}' send` — provides elicitation field answers up front as a JSON object keyed by field name, so no prompt is shown
+2. **Decline automatically with `--non-interactive`:** `email --non-interactive send` — declines (or fails) instead of prompting whenever the server elicits or samples
+3. **Pipe input:** `echo "value" | email send`
+4. **Use `--timeout`:** `email --timeout 30 send` — fails after 30s if blocked
+5. **Server-side:** Configure the server to skip elicitation for automated clients
 
 ---
 

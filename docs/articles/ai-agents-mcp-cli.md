@@ -58,7 +58,7 @@ tools --json ls --tools
     "items": [
       { "id": "search", "kind": "tool", "summary": "Search the knowledge base" },
       { "id": "calculate", "kind": "tool", "summary": "Perform calculations" },
-      { "id": "email.send", "kind": "tool", "summary": "Send an email" }
+      { "id": "notify.email", "kind": "tool", "summary": "Send an email notification" }
     ]
   }
 }

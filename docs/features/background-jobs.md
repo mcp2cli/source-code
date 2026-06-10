@@ -10,15 +10,15 @@ Some MCP tools take minutes or hours to complete — data exports, deployments, 
 
 ```bash
 # Submit a background job
-work deploy --version 2.0 --background
+email deploy --version 2.0 --background
 # → Job submitted: job_abc123 (task: task_xyz789)
 
 # Check status
-work jobs show --latest
+email jobs show --latest
 # → status: running, remote status: running
 
 # Wait for completion
-work jobs wait --latest
+email jobs wait --latest
 # → status: completed, result: { ... }
 ```
 
@@ -29,9 +29,9 @@ work jobs wait --latest
 Any tool command supports `--background`:
 
 ```bash
-work deploy --version 2.0 --background
-work export --dataset full --format parquet --background
-work batch-process --input data.csv --background
+email deploy --version 2.0 --background
+email export --dataset full --format parquet --background
+email batch-process --input data.csv --background
 ```
 
 When `--background` is used:
@@ -48,7 +48,7 @@ When `--background` is used:
 ### List Jobs
 
 ```bash
-work jobs list
+email jobs list
 ```
 
 ```text
@@ -60,10 +60,10 @@ job_def456  export       completed task_uvw012  2026-03-30T09:30:00Z
 
 ```bash
 # By ID
-work jobs show job_abc123
+email jobs show job_abc123
 
 # Latest job
-work jobs show --latest
+email jobs show --latest
 ```
 
 ### Wait for Completion
@@ -71,15 +71,15 @@ work jobs show --latest
 Block until the job finishes:
 
 ```bash
-work jobs wait job_abc123
-work jobs wait --latest
+email jobs wait job_abc123
+email jobs wait --latest
 ```
 
 ### Cancel a Job
 
 ```bash
-work jobs cancel job_abc123
-work jobs cancel --latest
+email jobs cancel job_abc123
+email jobs cancel --latest
 ```
 
 ### Watch Job Progress
@@ -87,8 +87,8 @@ work jobs cancel --latest
 Stream real-time progress events:
 
 ```bash
-work jobs watch job_abc123
-work jobs watch --latest
+email jobs watch job_abc123
+email jobs watch --latest
 ```
 
 ---
@@ -175,9 +175,9 @@ Jobs are persisted to disk at `instances/<name>/jobs/`. Each job record contains
 All jobs commands support structured output:
 
 ```bash
-work --json jobs list | jq '.[].status'
-work --json jobs show --latest | jq '.data.remote'
-work --json jobs wait --latest | jq '.data.result'
+email --json jobs list | jq '.[].status'
+email --json jobs show --latest | jq '.data.remote'
+email --json jobs wait --latest | jq '.data.result'
 ```
 
 ---
@@ -191,15 +191,15 @@ work --json jobs wait --latest | jq '.data.result'
 set -e
 
 # Submit deployment
-RESULT=$(work --json deploy --version "$VERSION" --background)
+RESULT=$(email --json deploy --version "$VERSION" --background)
 JOB_ID=$(echo "$RESULT" | jq -r '.data.job_id')
 
 echo "Deployment submitted: $JOB_ID"
 
 # Wait for completion with timeout
-if ! timeout 600 work jobs wait "$JOB_ID"; then
+if ! timeout 600 email jobs wait "$JOB_ID"; then
   echo "Deployment timed out"
-  work jobs cancel "$JOB_ID"
+  email jobs cancel "$JOB_ID"
   exit 1
 fi
 
@@ -210,12 +210,12 @@ echo "Deployment complete"
 
 ```bash
 # Submit multiple jobs
-work export --dataset users --background
-work export --dataset orders --background
-work export --dataset analytics --background
+email export --dataset users --background
+email export --dataset orders --background
+email export --dataset analytics --background
 
 # Monitor all
-work jobs list
+email jobs list
 ```
 
 ---

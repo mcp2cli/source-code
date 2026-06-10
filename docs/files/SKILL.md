@@ -62,7 +62,7 @@ Every command supports `--json`. The response envelope is:
 }
 ```
 
-Pipe to `jq` for scripting: `work --json ls | jq '.data.items[].id'`
+Pipe to `jq` for scripting: `email --json ls | jq '.data.items[].id'`
 
 ---
 
@@ -77,9 +77,9 @@ mcp2cli --url http://localhost:3001/mcp ls --tools
 mcp2cli --url http://localhost:3001/mcp ls --resources
 
 # Named alias
-work ls
-work ls --prompts
-work ls --filter "email"
+email ls
+email ls --prompts
+email ls --filter "draft"
 ```
 
 ### Call a tool
@@ -89,49 +89,50 @@ work ls --filter "email"
 mcp2cli --url http://localhost:3001/mcp echo --message hello
 
 # Named alias
-work echo --message hello
-work email send --to user@example.com --body "Hello"
+email send --to user@example.com --subject "Hi" --body "Hello"
+email search --query "from:boss"
+email reply --thread-id 123 --body "Thanks"
 ```
 
 ### Read a resource
 
 ```bash
-work get demo://resource/readme.md
-work get file:///project/README.md
+email get mail://inbox
+email get mail://thread/123
 ```
 
 ### Run a prompt
 
 ```bash
-work simple-prompt
-work complex-prompt --temperature 0.7 --style concise
+email simple-prompt
+email complex-prompt --temperature 0.7 --style concise
 ```
 
 ### Health check
 
 ```bash
 mcp2cli --url http://localhost:3001/mcp doctor
-work doctor
-work --json doctor | jq '.data.server'
+email doctor
+email --json doctor | jq '.data.server'
 ```
 
 ### Background jobs
 
 ```bash
-work analyze-dataset --background
-work jobs list
-work jobs watch --latest
-work jobs cancel --latest
+email search --query "from:boss" --background
+email jobs list
+email jobs watch --latest
+email jobs cancel --latest
 ```
 
 ### Create a config and alias
 
 ```bash
-mcp2cli config init --name work \
+mcp2cli config init --name email \
   --transport streamable_http \
-  --endpoint http://127.0.0.1:3001/mcp
+  --endpoint https://mcp.example.com/email
 
-mcp2cli link create --name work      # creates ~/.local/bin/work + man page
+mcp2cli link create --name email     # creates ~/.local/bin/email + man page
 
 # PATH (one time)
 export PATH="$HOME/.local/bin:$PATH"
@@ -142,7 +143,7 @@ export PATH="$HOME/.local/bin:$PATH"
 ```bash
 mcp2cli man install              # installs mcp2cli(1)
 man mcp2cli                      # read it
-man work                         # alias man page
+man email                        # alias man page
 ```
 
 ---
@@ -206,8 +207,8 @@ profile:
       - send
       - reply
   flags:
-    echo:
-      message: msg
+    send:
+      body: text
   resource_verb: fetch
 ```
 

@@ -87,7 +87,7 @@ Spawn a local MCP server as a subprocess:
 # Create config pointing to a local server
 mcp2cli config init --name local --app bridge --transport stdio \
   --stdio-command npx \
-  --stdio-args '@modelcontextprotocol/server-everything'
+  --stdio-arg '@modelcontextprotocol/server-everything'
 
 mcp2cli use local
 mcp2cli ls
@@ -95,14 +95,14 @@ mcp2cli ls
 
 ### Option C: Remote HTTP Server
 
-Connect to a running HTTP MCP server:
+Connect to a running HTTP MCP server — here, a hosted email server:
 
 ```bash
-mcp2cli config init --name remote --app bridge \
+mcp2cli config init --name email --app bridge \
   --transport streamable_http \
-  --endpoint http://127.0.0.1:3001/mcp
+  --endpoint https://mcp.example.com/email
 
-mcp2cli use remote
+mcp2cli use email
 mcp2cli ls
 ```
 
@@ -132,7 +132,7 @@ mcp2cli ls --resources     # Resources only
 mcp2cli ls --prompts       # Prompts only
 
 # Search
-mcp2cli ls --filter echo
+mcp2cli ls --filter draft
 ```
 
 ---
@@ -143,13 +143,13 @@ Server tools become typed CLI commands. Flags come directly from JSON Schema:
 
 ```bash
 # Simple tool call
-mcp2cli echo --message "hello world"
+mcp2cli send --to user@example.com --subject "Hi" --body "hello world"
 
 # Tool with multiple arguments
-mcp2cli add --a 5 --b 3
+mcp2cli reply --thread-id 123 --body "Thanks!"
 
 # Tool with complex arguments
-mcp2cli deploy --tags '["alpha","beta"]' --config '{"replicas":3}'
+mcp2cli draft create --subject "New" --labels '["alpha","beta"]'
 ```
 
 ---
@@ -158,10 +158,10 @@ mcp2cli deploy --tags '["alpha","beta"]' --config '{"replicas":3}'
 
 ```bash
 # By URI
-mcp2cli get demo://resource/readme.md
+mcp2cli get mail://inbox
 
 # Resource template (parameterized)
-mcp2cli user-profile --user-id 42
+mcp2cli get mail://thread/123
 ```
 
 ---
@@ -180,12 +180,12 @@ mcp2cli complex-prompt --temperature 0.7 --style concise
 Make your server feel like a standalone application:
 
 ```bash
-mcp2cli link create --name work
+mcp2cli link create --name email
 
 # Now use it directly
-work ls
-work echo --message "hello from alias"
-work doctor
+email ls
+email send --to user@example.com --subject "Hi" --body "hello from alias"
+email doctor
 ```
 
 ---
@@ -196,13 +196,13 @@ Every command supports structured JSON output:
 
 ```bash
 # JSON envelope
-work --json ls
+email --json ls
 
 # Pipe to jq
-work --json echo --message hello | jq '.data'
+email --json search --query "from:boss" | jq '.data'
 
 # NDJSON for streaming
-work --output ndjson ls
+email --output ndjson ls
 ```
 
 ---

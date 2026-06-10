@@ -22,10 +22,31 @@ mcp2cli --stdio <COMMAND> [--env KEY=VAL]... [--json] [--timeout <SECS>] <comman
 |------|-------|-------------|
 | `--json` | | Output JSON instead of human-readable text |
 | `--output <FORMAT>` | `-o` | Output format: `human`, `json`, `ndjson` |
-| `--timeout <SECS>` | | Request timeout in seconds (0 = no timeout) |
+| `--timeout <SECONDS>` | | Operation timeout in seconds (`0` = no timeout; overrides config) |
+| `--non-interactive` | | Fail instead of prompting for input (CI mode) |
+| `--input-json <JSON>` | | Supply elicitation answers (and `auth login` credentials) as a JSON object so prompts never block (CI mode) |
+| `--no-telemetry` | | Disable anonymous local usage telemetry for this invocation |
 | `--url <URL>` | | Ad-hoc HTTP MCP server URL (no config needed) |
 | `--stdio <COMMAND>` | | Ad-hoc stdio MCP server command (no config needed) |
 | `--env <KEY=VALUE>` | | Environment variable for `--stdio` server (repeatable) |
+
+### CI / non-interactive mode
+
+`--non-interactive`, `--input-json`, and `--timeout` are global and apply to every
+command surface (the dynamic per-server CLI and the static bridge). They make
+mcp2cli safe to run unattended:
+
+- `--non-interactive` turns any prompt (elicitation, `auth login` token entry)
+  into an immediate error instead of blocking on a TTY.
+- `--input-json '<OBJECT>'` pre-supplies answers. For elicitation, the keys are
+  the requested field names. For `auth login`, pass
+  `--input-json '{"bearer_token": "<token>", "account": "<optional>"}'`.
+
+```bash
+email --non-interactive search --query "from:boss"
+email --input-json '{"bearer_token": "tok_123"}' auth login
+email --no-telemetry --timeout 30 send --to user@example.com --subject "Hi" --body "..."
+```
 
 ---
 
@@ -39,20 +60,33 @@ Create a new named config.
 
 ```bash
 mcp2cli config init --name <NAME> --app bridge \
-  --transport <stdio|streamable_http> \
+  [--transport <stdio|streamable_http>] \
   [--endpoint <URL>] \
   [--stdio-command <CMD>] \
-  [--stdio-args <ARG>...]
+  [--stdio-arg <ARG>]... \
+  [--force]
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--name <NAME>` | ✅ | Config name (alphanumeric, hyphens) |
-| `--app <PROFILE>` | ✅ | Application profile (`bridge`) |
-| `--transport <TYPE>` | ✅ | `stdio` or `streamable_http` |
+| `--app <PROFILE>` | | Application profile (default: `bridge`) |
+| `--transport <TYPE>` | | `stdio` or `streamable_http` (default: `streamable_http`) |
 | `--endpoint <URL>` | for HTTP | Server endpoint URL |
 | `--stdio-command <CMD>` | for stdio | Subprocess command |
-| `--stdio-args <ARG>...` | | Subprocess arguments |
+| `--stdio-arg <ARG>` | | Subprocess argument (repeat for each arg) |
+| `--force` | | Overwrite an existing config of the same name |
+
+```bash
+# HTTP email server
+mcp2cli config init --name email --app bridge \
+  --transport streamable_http --endpoint https://mcp.example.com/email
+
+# Local stdio reference server (the everything server speaks echo/add, not email)
+mcp2cli config init --name local --app bridge \
+  --transport stdio --stdio-command npx \
+  --stdio-arg @modelcontextprotocol/server-everything
+```
 
 ### `config list`
 
@@ -75,25 +109,36 @@ mcp2cli config show --name <NAME>
 Manage the active config.
 
 ```bash
-mcp2cli use <NAME>         # Set active config
+mcp2cli use email          # Set active config
 mcp2cli use --show         # Show current active config
 mcp2cli use --clear        # Clear active config
 ```
 
 ### `link create`
 
-Create a symlink alias to mcp2cli.
+Create a symlink alias to mcp2cli. By default this also generates and installs a
+man page for the alias.
 
 ```bash
-mcp2cli link create --name <NAME> [--dir <PATH>]
+mcp2cli link create --name email \
+  [--dir <PATH>] [--force] [--man-dir <PATH>] [--no-man]
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--name <NAME>` | ✅ | Alias name (also the symlink filename) |
 | `--dir <PATH>` | | Directory for the symlink (default: next to binary) |
+| `--force` | | Replace an existing symlink of the same name |
+| `--man-dir <PATH>` | | Man page install directory (default: `~/.local/share/man/man1`) |
+| `--no-man` | | Skip man page generation and installation |
 
 Reserved names: `mcp2cli`, `config`, `link`, `use`, `daemon`.
+
+```bash
+# Install an `email` alias bound to the active/email config
+mcp2cli link create --name email
+# email ls, email send, email auth login ... now dispatch to that config
+```
 
 ### `daemon`
 
@@ -114,7 +159,7 @@ mcp2cli daemon status [CONFIG_NAME]   # Check daemon status
 List server capabilities.
 
 ```bash
-<alias> ls [--tools] [--resources] [--prompts] [--filter <PATTERN>]
+<alias> ls [--tools] [--resources] [--prompts] [--filter <PATTERN>] [--all]
 ```
 
 | Flag | Description |
@@ -123,6 +168,7 @@ List server capabilities.
 | `--resources` | Show only resources |
 | `--prompts` | Show only prompts |
 | `--filter <PATTERN>` | Filter results by name substring |
+| `--all` | List every item without pagination |
 
 ### `inspect`
 
@@ -156,27 +202,44 @@ Server liveness check with latency measurement.
 
 ### Dynamic (auto-generated)
 
-Server tools become commands with flags from JSON Schema:
+Server tools become commands with flags from JSON Schema. With an `email` alias
+bound to an email MCP server, its tools are exposed directly (the alias already
+namespaces them, so there is no `email.` prefix on the command):
 
 ```bash
 <alias> <tool-name> [--flag <value>]...
 ```
 
-Examples:
+Examples against the `email` server:
 
 ```bash
-work echo --message hello              # String flag
-work add --a 5 --b 3                   # Integer flags
-work deploy --tags '["a","b"]'         # Array flag (JSON)
-work process --include-metadata        # Boolean flag
-work build --config '{"opt": true}'    # JSON flag
+email send --to user@example.com --subject "Hi" --body "..."   # String flags
+email search --query "from:boss"                               # String flag
+email draft create --subject "New draft"                       # Dotted tool (draft.create)
+email reply --thread-id 123 --body "Thanks"                    # String flags
+email labels add --thread-id 123 --label important             # Dotted tool (labels.add)
 ```
+
+Flag types follow the tool's JSON Schema — booleans become bare switches, arrays
+and objects take JSON values:
+
+```bash
+local echo --message hello             # String flag
+local add --a 5 --b 3                  # Integer flags
+<alias> deploy --tags '["a","b"]'      # Array flag (JSON)
+<alias> process --include-metadata     # Boolean flag
+<alias> build --config '{"opt": true}' # JSON flag
+```
+
+> The `local` alias above points at a stdio
+> `@modelcontextprotocol/server-everything` config — a real reference server
+> whose tools are `echo`/`add`/etc., not email tools.
 
 ### Static Bridge Fallback
 
 ```bash
-<alias> tool list
-<alias> tool call --name <TOOL_NAME> [--arg <KEY=VALUE>]... [--args-file <PATH>] [--args-json <JSON>] [--background]
+<alias> tool list [--filter <PATTERN>] [--all]
+<alias> tool call <TOOL_NAME> [--arg <KEY=VALUE>]... [--args-file <PATH>] [--args-json <JSON>] [--background]
 ```
 
 ---
@@ -190,6 +253,13 @@ work build --config '{"opt": true}'    # JSON flag
 <alias> <resource-verb> <URI>        # If profile.resource_verb is set
 ```
 
+Examples against the `email` server:
+
+```bash
+email get mail://inbox
+email get mail://thread/123
+```
+
 ### Resource Templates (auto-generated)
 
 ```bash
@@ -200,8 +270,8 @@ work build --config '{"opt": true}'    # JSON flag
 ### Static Bridge Fallback
 
 ```bash
-<alias> resource list
-<alias> resource read --uri <URI>
+<alias> resource list [--filter <PATTERN>] [--all]
+<alias> resource read <URI>
 ```
 
 ### Subscriptions
@@ -224,8 +294,8 @@ work build --config '{"opt": true}'    # JSON flag
 ### Static Bridge Fallback
 
 ```bash
-<alias> prompt list
-<alias> prompt run --name <PROMPT_NAME> [--arg <KEY=VALUE>]...
+<alias> prompt list [--filter <PATTERN>] [--all]
+<alias> prompt run <PROMPT_NAME> [--arg <KEY=VALUE>]...
 ```
 
 ---
@@ -233,10 +303,15 @@ work build --config '{"opt": true}'    # JSON flag
 ## Auth Commands
 
 ```bash
-<alias> auth login         # Interactive token prompt
-<alias> auth logout        # Clear stored credentials
-<alias> auth status        # Show current auth state
+email auth login           # Prompt for a bearer token (or read it from stdin)
+email auth logout          # Clear stored credentials
+email auth status          # Show current auth state
 ```
+
+`auth login` reads a bearer token interactively, from a piped stdin
+(`echo "$TOKEN" | email auth login`), or from
+`--input-json '{"bearer_token": "<token>"}'`. With `--non-interactive` and no
+token available it fails fast instead of prompting.
 
 ---
 
@@ -295,16 +370,16 @@ Multiple sources for tool arguments, merged in order (later wins):
 
 ```bash
 # From file
-<alias> tool-name --args-file ./payload.json
+email send --args-file ./payload.json
 
 # From JSON string
-<alias> tool-name --args-json '{"key": "value"}'
+email send --args-json '{"to": "user@example.com"}'
 
 # From flags
-<alias> tool-name --key value
+email send --to user@example.com
 
 # Combined (merged, flags override)
-<alias> tool-name --args-file base.json --args-json '{"override": true}' --key final-value
+email send --args-file base.json --args-json '{"subject": "Hi"}' --to final@example.com
 ```
 
 ---

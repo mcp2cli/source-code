@@ -64,7 +64,7 @@ mcp2cli ls               # Discover capabilities
 mcp2cli config init --name myserver --app bridge \
   --transport stdio \
   --stdio-command your-server-binary \
-  --stdio-args '--config=config.yaml'
+  --stdio-arg '--config=config.yaml'
 
 mcp2cli use myserver
 mcp2cli doctor

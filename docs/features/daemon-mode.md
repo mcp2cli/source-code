@@ -97,13 +97,13 @@ You don't need to change your commands. When a daemon is running, mcp2cli **auto
 
 ```bash
 # Without daemon: spawns subprocess, initializes, calls tool, tears down
-work echo --message hello    # ~2s
+local echo --message hello    # ~2s
 
 # Start daemon
-mcp2cli daemon start work
+mcp2cli daemon start local
 
 # With daemon: connects to socket, calls tool, done
-work echo --message hello    # ~50ms
+local echo --message hello    # ~50ms
 ```
 
 The detection happens in `build_client()`:
@@ -132,15 +132,15 @@ Each request is one line of JSON (a serialized `McpOperation`), and the response
 | File | Purpose |
 |------|---------|
 | `instances/<name>/daemon.json` | PID file with process metadata |
-| `instances/<name>/daemon.sock` | Unix domain socket for IPC |
+| `instances/<name>/daemon.sock` | Unix domain socket for IPC (restricted to `0600`, owner-only) |
 
 ### PID File Format
 
 ```json
 {
   "pid": 12345,
-  "config_name": "work",
-  "socket_path": "/home/user/.local/share/mcp2cli/instances/work/daemon.sock",
+  "config_name": "email",
+  "socket_path": "/home/user/.local/share/mcp2cli/instances/email/daemon.sock",
   "started_at": "2026-03-30T10:15:30Z"
 }
 ```
@@ -161,7 +161,7 @@ The daemon handles:
 For debugging, run the daemon in the foreground:
 
 ```bash
-MCP2CLI_DAEMON_FOREGROUND=1 mcp2cli daemon start work
+MCP2CLI_DAEMON_FOREGROUND=1 mcp2cli daemon start email
 ```
 
 This keeps the process attached to your terminal with full log output.
@@ -205,15 +205,15 @@ mcp2cli daemon status
 
 ```bash
 # Start of pipeline
-mcp2cli daemon start ci-server
+mcp2cli daemon start email
 
 # Run multiple commands without re-init overhead
-work --json ls | jq '.data.items | length'
-work echo --message "smoke-test"
-work --json doctor | jq '.data.server'
+email --json ls | jq '.data.items | length'
+email send --to user@example.com --subject "smoke-test" --body "ok"
+email --json doctor | jq '.data.server'
 
 # End of pipeline
-mcp2cli daemon stop ci-server
+mcp2cli daemon stop email
 ```
 
 ---

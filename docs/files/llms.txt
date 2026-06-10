@@ -19,11 +19,11 @@ mcp2cli --url http://127.0.0.1:3001/mcp echo --message hello
 mcp2cli --stdio "npx @modelcontextprotocol/server-everything" ls
 
 # Named config + alias
-mcp2cli config init --name work --transport streamable_http --endpoint http://127.0.0.1:3001/mcp
-mcp2cli link create --name work
-work ls
-work echo --message hello
-work doctor
+mcp2cli config init --name email --transport streamable_http --endpoint https://mcp.example.com/email
+mcp2cli link create --name email
+email ls
+email send --to user@example.com --subject "Hi" --body "..."
+email doctor
 ```
 
 ## Installation
@@ -38,7 +38,7 @@ Full install guide: [docs/files/INSTALL.md](INSTALL.md)
 ## Key capabilities
 
 - Discovery-driven dynamic CLI — JSON Schema → typed `--flags`
-- Named configs + symlink aliases (`work`, `prod`, `staging`)
+- Named configs + symlink aliases (`email`, `prod`, `staging`)
 - Ad-hoc mode (`--url`, `--stdio`) — zero config
 - Profile overlays — rename, hide, group commands
 - Background jobs (`--background`, `jobs watch`)

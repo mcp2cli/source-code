@@ -158,21 +158,21 @@ For day-to-day use, create a named config and a symlink alias:
 
 ```bash
 # 1. Create a named config
-mcp2cli config init --name work \
+mcp2cli config init --name email \
   --transport streamable_http \
-  --endpoint http://127.0.0.1:3001/mcp
+  --endpoint https://mcp.example.com/email
 
 # 2. Create a symlink alias + man page
-mcp2cli link create --name work
+mcp2cli link create --name email
 
 # 3. Put the link directory on your PATH (once)
 export PATH="$HOME/.local/bin:$PATH"
 
 # 4. Use the alias as a standalone application
-work ls
-work echo --message hello
-work doctor
-man work      # alias man page
+email ls
+email send --to user@example.com --subject "Hi" --body "Hello there"
+email doctor
+man email      # alias man page
 ```
 
 ### Multiple servers
@@ -215,7 +215,7 @@ Same as Linux. If using Homebrew's shell, the above export usually belongs in
 If you prefer symlinks in a different directory:
 
 ```bash
-mcp2cli link create --name work --dir /usr/local/bin
+mcp2cli link create --name email --dir /usr/local/bin
 ```
 
 ---
@@ -329,21 +329,21 @@ included by default. On macOS you may need:
 export MANPATH="$HOME/.local/share/man:$(manpath)"
 ```
 
-### `no named config 'work' found`
+### `no named config 'email' found`
 
-You attempted `mcp2cli link create --name work` before creating the config.
+You attempted `mcp2cli link create --name email` before creating the config.
 Create it first:
 
 ```bash
-mcp2cli config init --name work --transport streamable_http --endpoint http://...
-mcp2cli link create --name work
+mcp2cli config init --name email --transport streamable_http --endpoint https://...
+mcp2cli link create --name email
 ```
 
 Or use `--force` to create the symlink without a config (useful when the config
 will be created later):
 
 ```bash
-mcp2cli link create --name work --force
+mcp2cli link create --name email --force
 ```
 
 ### Connection errors

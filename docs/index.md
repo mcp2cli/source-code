@@ -4,9 +4,9 @@
 
 ```bash
 # One binary. Any server. Real CLI commands.
-work echo --message hello
-work email send --to user@example.com --body "Meeting at 3"
-work get file:///project/README.md
+local echo --message hello
+email send --to user@example.com --body "Meeting at 3"
+email get mail://inbox
 staging deploy --version 2.1.0 --background
 ```
 
@@ -29,7 +29,7 @@ staging deploy --version 2.1.0 --background
 ```mermaid
 graph TB
     subgraph "User Interface"
-        CLI["CLI Input<br/>work echo --message hello"]
+        CLI["CLI Input<br/>local echo --message hello"]
         JSON["--json output"]
     end
 

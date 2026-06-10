@@ -90,11 +90,11 @@ Progress tokens are attached automatically via `_meta.progressToken`; matching [
 
 ```bash
 # Dynamic (typed flags per tool):
-work email send --to user@example.com --body "Meeting at 3"
-work search --query "metrics" --limit 10
+email send --to user@example.com --body "Meeting at 3"
+email search --query "metrics" --limit 10
 
 # Static/protocol-shaped (any server, opaque args):
-mcp2cli invoke email.send --arg to=user@example.com --arg body=@body.txt
+mcp2cli invoke send --arg to=user@example.com --arg body=@body.txt
 mcp2cli invoke slow-job --background          # returns job id; see `jobs`
 ```
 
@@ -117,7 +117,7 @@ mcp2cli invoke slow-job --background          # returns job id; see `jobs`
 
 ```bash
 mcp2cli get file:///etc/hosts                  # read a concrete URI
-work get "file:///{path}" --path docs/index.md # parameterised template
+email get "file:///{path}" --path docs/index.md # parameterised template
 mcp2cli subscribe file:///config/current.yaml  # stream updates
 mcp2cli unsubscribe file:///config/current.yaml
 ```
@@ -137,8 +137,8 @@ mcp2cli unsubscribe file:///config/current.yaml
 **CLI surface.**
 
 ```bash
-work prompt review-diff --diff-file hunk.patch
-work prompt summarise --context-thread-id 123
+email prompt review-diff --diff-file hunk.patch
+email prompt summarise --context-thread-id 123
 ```
 
 **Source.** [`src/mcp/protocol.rs`](../src/mcp/protocol.rs) — `map_operation_to_request` (RunPrompt arm), `flatten_prompt_arguments`.

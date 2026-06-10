@@ -45,8 +45,8 @@ the public UX.
 - **Named configs** bind to MCP servers. Each config is a YAML file that
   specifies a transport (stdio or streamable HTTP), an endpoint, and runtime
   preferences.
-- **Invocation-name dispatch** lets you create symlink aliases (`work`,
-  `email`, `staging`) that automatically select the matching config.
+- **Invocation-name dispatch** lets you create symlink aliases (`email`,
+  `github`, `staging`) that automatically select the matching config.
 - **Active config** (`mcp2cli use <name>`) sets a default so you can run
   commands directly without a name prefix.
 - **Profile overlays** let you rename, hide, group, and alias commands to
@@ -69,7 +69,7 @@ mcp2cli config init \
   --app bridge \
   --transport stdio \
   --stdio-command npx \
-  --stdio-args '@modelcontextprotocol/server-everything'
+  --stdio-arg '@modelcontextprotocol/server-everything'
 ```
 
 This creates `configs/local.yaml` in the platform config directory with a
@@ -80,10 +80,10 @@ subprocess.
 
 ```bash
 mcp2cli config init \
-  --name production \
+  --name email \
   --app bridge \
   --transport streamable_http \
-  --endpoint http://127.0.0.1:3001/mcp
+  --endpoint https://mcp.example.com/email
 ```
 
 ### Listing configs
@@ -95,13 +95,13 @@ mcp2cli config list
 ### Showing a specific config
 
 ```bash
-mcp2cli config show --name production
+mcp2cli config show --name email
 ```
 
 ### Setting the active config
 
 ```bash
-mcp2cli use production     # Set active config
+mcp2cli use email          # Set active config
 mcp2cli use --show         # Show current active config
 mcp2cli use --clear        # Clear active config
 ```
@@ -109,7 +109,7 @@ mcp2cli use --clear        # Clear active config
 When an active config is set, commands can be invoked directly:
 
 ```bash
-mcp2cli echo --message hello
+mcp2cli send --to user@example.com --subject "Hi" --body hello
 ```
 
 ### Config YAML structure
@@ -164,7 +164,7 @@ events:
 Any config field can be overridden with a `MCP2CLI_` environment variable:
 
 ```bash
-MCP2CLI_LOGGING__LEVEL=debug work echo --message test
+MCP2CLI_LOGGING__LEVEL=debug email search --query test
 ```
 
 The config and data directories themselves can be overridden:
@@ -183,50 +183,50 @@ primary listing interface:
 ### List all capabilities
 
 ```bash
-work ls
+email ls
 ```
 
 ### Filter by kind
 
 ```bash
-work ls --tools            # Tools only
-work ls --resources        # Resources only
-work ls --prompts          # Prompts only
+email ls --tools            # Tools only
+email ls --resources        # Resources only
+email ls --prompts          # Prompts only
 ```
 
 ### Filter by name/description
 
 ```bash
-work ls --filter echo
-work ls --filter deploy --tools
+email ls --filter send
+email ls --filter draft --tools
 ```
 
 ### Pagination
 
 ```bash
-work ls --limit 5
-work ls --cursor "next-page-token"
-work ls --all                      # Show everything
+email ls --limit 5
+email ls --cursor "next-page-token"
+email ls --all                      # Show everything
 ```
 
 ### JSON output
 
 ```bash
-work --json ls
+email --json ls
 ```
 
 Returns structured JSON with the full discovery payload:
 
 ```json
 {
-  "app_id": "work",
+  "app_id": "email",
   "command": "discover",
   "summary": "discovered 14 capabilities",
   "lines": ["..."],
   "data": {
     "category": "capabilities",
     "items": [
-      { "id": "echo", "kind": "tool", "title": "Echo Tool", "description": "..." }
+      { "id": "send", "kind": "tool", "title": "Send Email", "description": "..." }
     ]
   }
 }
@@ -239,7 +239,7 @@ the server is down), mcp2cli falls back to the cached inventory with an
 explicit stale-data warning:
 
 ```text
-[work] live discovery failed; returned cached inventory instead
+[email] live discovery failed; returned cached inventory instead
 ```
 
 This means you can still list capabilities using the last known server state,
@@ -266,47 +266,49 @@ command with typed flags derived from its `inputSchema`.
 ### Basic invocation
 
 ```bash
-work echo --message hello
+email send --to user@example.com --subject "Hi" --body "Hello"
 ```
 
 Output:
 
 ```yaml
-title: Echo Tool
-description: Echoes back the input string
-Echo: hello
+title: Send Email
+description: Sends an email message
+sent: user@example.com
 ```
 
 ### Multiple arguments
 
 ```bash
-work add --a 5 --b 3
+email reply --thread-id 123 --body "Thanks"
 ```
 
 ### Enum arguments
 
 ```bash
-work annotated-message --message-type error --include-image
+email send --to user@example.com --subject "Status" --priority high
 ```
 
-The `--message-type` flag only accepts values from the schema's enum:
-`error`, `success`, `debug`.
+The `--priority` flag only accepts values from the schema's enum:
+`high`, `normal`, `low`.
 
 ### Viewing tool help
 
 ```bash
-work echo --help
+email send --help
 ```
 
 Output:
 
 ```yaml
-Echoes back the input
+Sends an email message
 
-USAGE: work echo --message <MESSAGE>
+USAGE: email send --to <TO> --subject <SUBJECT> --body <BODY>
 
 OPTIONS:
-  --message <MESSAGE>    Message to echo [required]
+  --to <TO>              Recipient address [required]
+  --subject <SUBJECT>    Message subject [required]
+  --body <BODY>          Message body [required]
   --json                 Output in JSON format
   --background           Run as background job
   -h, --help             Print help
@@ -317,16 +319,17 @@ OPTIONS:
 Dotted tool names become nested subcommands:
 
 ```bash
-# Server exposes: email.send, email.reply, email.draft.create
-work email send --to user@example.com --body "Hello"
-work email reply --thread-id 123 --body "Thanks"
-work email draft create --subject "Draft"
+# Server exposes: draft.create, draft.list, labels.add, labels.list
+email draft create --subject "Draft"
+email draft list
+email labels add --thread-id 123 --label important
+email labels list
 ```
 
 ### Background invocation
 
 ```bash
-work long-running-operation --duration 10 --steps 5 --background
+email send --to list@example.com --subject "Newsletter" --body "..." --background
 ```
 
 This creates a local job record that tracks the remote task. See
@@ -335,7 +338,7 @@ This creates a local job record that tracks the remote task. See
 ### JSON output
 
 ```bash
-work --json echo --message hello
+email --json send --to user@example.com --subject "Hi" --body "Hello"
 ```
 
 ### How tool invocation maps to MCP protocol
@@ -355,16 +358,16 @@ data blobs.
 ### Read a concrete resource
 
 ```bash
-work get "demo://resource/static/document/architecture.md"
+email get "mail://inbox"
 ```
 
 Output:
 
 ```yaml
-uri: demo://resource/static/document/architecture.md
+uri: mail://inbox
 mime_type: text/markdown
 content:
-  # Everything Server – Architecture
+  # Inbox – 12 unread messages
   ...
 ```
 
@@ -377,17 +380,17 @@ Parameterized resources (URI templates) become their own commands with typed
 flags:
 
 ```bash
-# Single-parameter template: greeting/{name} → positional argument
-work greeting Alice
+# Single-parameter template: mail://thread/{id} → positional argument
+email get "mail://thread/123"
 
 # Multi-parameter template: mail://search?q={query}&folder={folder} → flags
-work mail-search --query invoice --folder inbox
+email mail-search --query invoice --folder inbox
 ```
 
 ### JSON output
 
 ```bash
-work --json get "demo://resource/static/document/architecture.md"
+email --json get "mail://thread/123"
 ```
 
 ### How resource reading maps to MCP protocol
@@ -410,7 +413,7 @@ messages. Each prompt becomes a top-level command with typed flags from its
 ### Run a simple prompt
 
 ```bash
-work simple-prompt
+email simple-prompt
 ```
 
 Output:
@@ -424,13 +427,13 @@ output:
 ### Run a prompt with arguments
 
 ```bash
-work complex-prompt --temperature 0.7 --style concise
+email complex-prompt --temperature 0.7 --style concise
 ```
 
 ### JSON output
 
 ```bash
-work --json simple-prompt
+email --json simple-prompt
 ```
 
 ### How prompts map to MCP protocol
@@ -454,7 +457,7 @@ payloads, additional argument mechanisms are available:
 Flags are generated from tool `inputSchema` and prompt `arguments`:
 
 ```bash
-work deploy --environment staging --replicas 3 --image myapp:latest
+email send --to user@example.com --subject "Hi" --body "Hello"
 ```
 
 Required flags are enforced. Optional flags use defaults from the schema.
@@ -464,17 +467,17 @@ Required flags are enforced. Optional flags use defaults from the schema.
 For values that must be a specific JSON type (arrays, objects):
 
 ```bash
-work configure --tags '["alpha","beta"]' --limits '{"cpu":"2","memory":"4Gi"}'
+email send --to user@example.com --cc '["a@example.com","b@example.com"]' --headers '{"X-Priority":"1"}'
 ```
 
 ### Bulk JSON payloads
 
 ```bash
 # From a JSON string
-work deploy --args-json '{"environment":"staging","config":{"replicas":3}}'
+email send --args-json '{"to":"user@example.com","subject":"Hi","body":"Hello"}'
 
 # From a file
-work deploy --args-file ./payload.json
+email send --args-file ./payload.json
 ```
 
 ### Merge precedence
@@ -487,10 +490,10 @@ at the leaf level):
 3. Typed flags (final override)
 
 ```bash
-work deploy \
+email send \
   --args-file ./base.json \
-  --args-json '{"config":{"replicas":10}}' \
-  --environment canary
+  --args-json '{"headers":{"X-Priority":"1"}}' \
+  --subject "Override subject"
 ```
 
 ---
@@ -503,13 +506,13 @@ credentials.
 ### Login
 
 ```bash
-work auth login
+email auth login
 ```
 
 For **real servers** (non-demo), this prompts for a bearer token via stdin:
 
 ```text
-enter bearer token for work: <paste token>
+enter bearer token for email: <paste token>
 ```
 
 The token is persisted in a file-backed token store at
@@ -521,7 +524,7 @@ flow is used.
 ### Check auth status
 
 ```bash
-work auth status
+email auth status
 ```
 
 Shows the current authentication state:
@@ -534,7 +537,7 @@ account: bearer-token (stored)
 ### Logout
 
 ```bash
-work auth logout
+email auth logout
 ```
 
 Clears the stored token and resets auth session state.
@@ -542,7 +545,7 @@ Clears the stored token and resets auth session state.
 ### JSON output
 
 ```bash
-work --json auth status
+email --json auth status
 ```
 
 ### Token persistence
@@ -576,7 +579,7 @@ protocol feature.
 1. You run a command that triggers an elicitation:
 
    ```bash
-   work trigger-elicitation-request
+   email trigger-elicitation-request
    ```
 
 2. The server sends an `elicitation/create` JSON-RPC request to the client
@@ -662,7 +665,7 @@ long-running operations as background jobs.
 ### Start a background job
 
 ```bash
-work long-running-operation --duration 10 --steps 5 --background
+email send --to list@example.com --subject "Newsletter" --body "..." --background
 ```
 
 If the server returns a task ID, a local `JobRecord` is created.
@@ -670,7 +673,7 @@ If the server returns a task ID, a local `JobRecord` is created.
 ### List all jobs
 
 ```bash
-work jobs list
+email jobs list
 ```
 
 Output:
@@ -683,16 +686,16 @@ def-456  completed  invoke
 ### Show job details
 
 ```bash
-work jobs show abc-123
-work jobs show --latest
-work jobs show --latest --command invoke
+email jobs show abc-123
+email jobs show --latest
+email jobs show --latest --command invoke
 ```
 
 ### Wait for a job to complete
 
 ```bash
-work jobs wait abc-123
-work jobs wait --latest
+email jobs wait abc-123
+email jobs wait --latest
 ```
 
 Synchronously waits for the remote task to reach a terminal state.
@@ -700,15 +703,15 @@ Synchronously waits for the remote task to reach a terminal state.
 ### Cancel a job
 
 ```bash
-work jobs cancel abc-123
-work jobs cancel --latest
+email jobs cancel abc-123
+email jobs cancel --latest
 ```
 
 ### Watch a job
 
 ```bash
-work jobs watch abc-123
-work jobs watch --latest --command invoke
+email jobs watch abc-123
+email jobs watch --latest --command invoke
 ```
 
 Watch emits runtime events as the job progresses and completes.
@@ -741,24 +744,24 @@ These runtime commands provide protocol-level control over the MCP session.
 ### Ping
 
 ```bash
-work ping
+email ping
 ```
 
 Sends an MCP `ping` request to check server liveness and measure round-trip
 latency. Useful for connectivity checks in scripts:
 
 ```bash
-work ping && echo "Server is alive"
+email ping && echo "Server is alive"
 ```
 
 ### Server-side logging level
 
 ```bash
-work log debug       # Set server log level to debug
-work log info
-work log warn
-work log error
-work log trace       # Maximum verbosity
+email log debug       # Set server log level to debug
+email log info
+email log warn
+email log error
+email log trace       # Maximum verbosity
 ```
 
 Sends a `logging/setLevel` notification to the server. This controls what the
@@ -768,7 +771,7 @@ that).
 ### Completions
 
 ```bash
-work complete ref/tool echo message "hel"
+email complete ref/tool send to "use"
 ```
 
 Sends a `completion/complete` request to the server, asking for suggested
@@ -787,16 +790,16 @@ Arguments:
 ### Doctor
 
 ```bash
-work doctor
+email doctor
 ```
 
 Shows a comprehensive health summary:
 
 ```yaml
-config: work
+config: email
 profile: bridge
-transport: stdio
-server: mcp-servers/everything 2.0.0
+transport: streamable_http
+server: mcp-servers/email 2.0.0
 auth: unauthenticated
 negotiated: protocol 2025-03-26 with 5 capability groups cached
 inventory: 14 tools, 3 resources, 2 prompts cached
@@ -813,7 +816,7 @@ Reports:
 ### Inspect
 
 ```bash
-work inspect
+email inspect
 ```
 
 Shows the full server capability response: protocol version, capabilities
@@ -823,7 +826,7 @@ Shows the full server capability response: protocol version, capabilities
 ### JSON output
 
 ```bash
-work --json doctor
+email --json doctor
 ```
 
 ---
@@ -860,10 +863,10 @@ events:
 Human-readable one-line events on stderr:
 
 ```json
-[work] invoking capability echo
-[work] job abc-123 running watch started
-[work] server info (db): Connection pool created
-[work] analyze-1 3/5 Computing aggregates...
+[email] invoking capability send
+[email] job abc-123 running watch started
+[email] server info (db): Connection pool created
+[email] analyze-1 3/5 Computing aggregates...
 ```
 
 #### HTTP webhook
@@ -982,12 +985,12 @@ standalone applications.
 ### Create a symlink alias
 
 ```bash
-mcp2cli link create --name work
+mcp2cli link create --name email
 ```
 
-This creates a symlink in the link directory (typically `~/.local/bin/work`)
-that points to the mcp2cli binary. When invoked as `work`, the runtime
-selects the `work` config automatically.
+This creates a symlink in the link directory (typically `~/.local/bin/email`)
+that points to the mcp2cli binary. When invoked as `email`, the runtime
+selects the `email` config automatically.
 
 ### Validation
 
@@ -1001,18 +1004,18 @@ mcp2cli link create --name staging --force
 ### Use the alias
 
 ```bash
-work ls
-work echo --message "from alias"
-work --json doctor
+email ls
+email send --to user@example.com --subject "Hi" --body "from alias"
+email --json doctor
 ```
 
-The alias behaves identically to `mcp2cli work <command>` — it dispatches
+The alias behaves identically to `mcp2cli email <command>` — it dispatches
 based on `argv[0]`.
 
 ### Custom link directory
 
 ```bash
-mcp2cli link create --name work --dir /usr/local/bin
+mcp2cli link create --name email --dir /usr/local/bin
 ```
 
 ### Reserved names
@@ -1033,22 +1036,22 @@ Add the `profile` section to your config YAML:
 
 ```yaml
 profile:
-  display_name: "Work Toolkit"
+  display_name: "Email Toolkit"
   aliases:
-    long-running-operation: lro
-    get-tiny-image: image
-    create.payload: object          # Rename grouped subcommand: "create payload" → "create object"
-    email.send: compose             # "email send" → "email compose"
+    search: find
+    send: post
+    draft.create: compose           # Rename grouped subcommand: "draft create" → "draft compose"
+    labels.list: ls                 # "labels list" → "labels ls"
   hide:
-    - print-env
+    - labels.add
     - debug-probe
   groups:
-    debug:
-      - print-env
-      - annotated-message
+    triage:
+      - reply
+      - draft.list
   flags:
-    echo:
-      message: msg
+    send:
+      body: text
   resource_verb: fetch
 ```
 
@@ -1066,13 +1069,12 @@ profile:
 ### Result
 
 ```bash
-work echo --msg hello             # Renamed flag
-work lro --duration 5             # Shortened command name
-work image                        # Friendly name
-work create object                # Renamed grouped subcommand (was: create payload)
-work email compose --to ...       # Renamed within group (was: email send)
-work debug print-env              # Custom group
-work fetch "demo://resource/..."  # Custom resource verb
+email post --to user@example.com --text hello   # Renamed command + flag (was: send --body)
+email find --query "from:boss"                   # Shortened command name (was: search)
+email draft compose --subject "New"              # Renamed grouped subcommand (was: draft create)
+email labels ls                                  # Renamed within group (was: labels list)
+email triage reply --thread-id 123 --body "Ok"   # Custom group
+email fetch "mail://inbox"                        # Custom resource verb
 ```
 
 Profiles are always optional. Without one, the CLI uses the server's metadata.
@@ -1086,25 +1088,25 @@ Profiles are always optional. Without one, the CLI uses the server's metadata.
 Human-readable text lines:
 
 ```text
-echo  tool  Echoes back the input string
+send  tool  Sends an email message
 ```
 
 ### JSON
 
 ```bash
-work --json ls
+email --json ls
 # or
-work --output json ls
+email --output json ls
 ```
 
 Structured JSON object:
 
 ```json
 {
-  "app_id": "work",
+  "app_id": "email",
   "command": "discover",
   "summary": "discovered 14 capabilities",
-  "lines": ["echo  tool  Echoes back the input string", "..."],
+  "lines": ["send  tool  Sends an email message", "..."],
   "data": { "category": "capabilities", "items": [...] }
 }
 ```
@@ -1112,7 +1114,7 @@ Structured JSON object:
 ### NDJSON
 
 ```bash
-work --output ndjson echo --message hello
+email --output ndjson send --to user@example.com --subject "Hi" --body "Hello"
 ```
 
 Newline-delimited JSON — each event and the final output are separate JSON
@@ -1219,7 +1221,7 @@ real server.
 ### 1. Run `ls` after setting up a config
 
 ```bash
-work ls
+email ls
 ```
 
 This populates the discovery cache, enabling:
@@ -1231,9 +1233,9 @@ This populates the discovery cache, enabling:
 ### 2. Use `--json` for scripting and automation
 
 ```bash
-work --json ls | jq '.data.items[].id'
-work --json echo --message test | jq '.data'
-work --json auth status | jq '.data.auth_session.state'
+email --json ls | jq '.data.items[].id'
+email --json send --to user@example.com --subject "Hi" --body "test" | jq '.data'
+email --json auth status | jq '.data.auth_session.state'
 ```
 
 ### 3. Use the alias workflow for multi-server setups
@@ -1255,20 +1257,20 @@ prod doctor
 ### 4. Use `--args-file` for complex payloads
 
 ```bash
-work deploy --args-file ./deploy-config.json
+email send --args-file ./message.json
 ```
 
 ### 5. Use background jobs for long-running operations
 
 ```bash
-work analyze-dataset --dataset q4-2025 --background
-work jobs watch --latest
+email send --to list@example.com --subject "Q4 update" --body "..." --background
+email jobs watch --latest
 ```
 
 ### 6. Use doctor to diagnose issues
 
 ```bash
-work doctor
+email doctor
 ```
 
 Check: Is auth set up? Is the server reachable? Are capabilities cached?
@@ -1291,7 +1293,7 @@ mcp2cli myserver --config /path/to/server.yaml ls
 ### 9. Keep logging quiet in normal use
 
 ```bash
-MCP2CLI_LOGGING__LEVEL=debug work echo --message test 2>debug.log
+MCP2CLI_LOGGING__LEVEL=debug email send --to user@example.com --subject "Hi" --body "test" 2>debug.log
 ```
 
 ### 10. Use profile overlays for polished CLIs
@@ -1299,7 +1301,7 @@ MCP2CLI_LOGGING__LEVEL=debug work echo --message test 2>debug.log
 ```yaml
 profile:
   aliases:
-    long-running-operation: lro
+    search: find
   hide:
     - internal-debug-tool
 ```

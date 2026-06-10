@@ -7,15 +7,43 @@ Manage server authentication with token persistence, interactive login, and auto
 ## Commands
 
 ```bash
-# Interactive login — prompts for token
-work auth login
+# Login — reads the bearer token from stdin, then falls back to a prompt
+echo "$TOKEN" | email auth login
+
+# Login non-interactively (fails fast instead of prompting if no token is piped)
+echo "$TOKEN" | email auth login --non-interactive
+
+# Login with a structured payload
+email auth login --input-json '{"bearer_token": "sk-abc123", "account": "me@example.com"}'
 
 # Check current state
-work auth status
+email auth status
 
 # Clear stored credentials
-work auth logout
+email auth logout
 ```
+
+`auth login` obtains the bearer token from one of three sources, in order:
+
+1. **Piped stdin** — `echo "$TOKEN" | email auth login`.
+2. **`--input-json`** — a JSON object with the schema below.
+3. **Interactive prompt** — used only when neither of the above provides a token.
+
+Pass `--non-interactive` to skip the prompt and fail fast (useful in CI and scripts) when no token is supplied via stdin or `--input-json`.
+
+### `--input-json` schema
+
+```json
+{
+  "bearer_token": "<token>",
+  "account": "<optional>"
+}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `bearer_token` | ✅ | The token sent as `Authorization: Bearer <token>`. |
+| `account` | — | Optional account label stored alongside the token. |
 
 ---
 
@@ -28,16 +56,16 @@ sequenceDiagram
     participant Store as Token Store
     participant Server as MCP Server
 
-    User->>CLI: work auth login
+    User->>CLI: email auth login
     CLI->>User: Enter token:
     User->>CLI: sk-abc123
-    CLI->>Store: Store token for "work"
+    CLI->>Store: Store token for "email"
     CLI-->>User: Authenticated ✓
 
     Note over User: Later...
 
-    User->>CLI: work echo --message hello
-    CLI->>Store: Load token for "work"
+    User->>CLI: email search --query "from:boss"
+    CLI->>Store: Load token for "email"
     Store-->>CLI: sk-abc123
     CLI->>Server: POST /mcp<br/>Authorization: Bearer sk-abc123
     Server-->>CLI: Result
@@ -54,7 +82,7 @@ Tokens are persisted per-config at:
 ~/.local/share/mcp2cli/instances/<name>/tokens.json
 ```
 
-The file contains:
+The file is written with `0600` permissions (owner read/write only) and contains:
 
 ```json
 {
@@ -83,10 +111,10 @@ auth:
 Check the current state:
 
 ```bash
-work auth status
+email auth status
 # → Auth state: active
 
-work --json auth status | jq '.data.auth_session.state'
+email --json auth status | jq '.data.auth_session.state'
 # → "active"
 ```
 
@@ -96,9 +124,15 @@ work --json auth status | jq '.data.auth_session.state'
 
 | Transport | Auth Support | How |
 |-----------|-------------|-----|
-| Streamable HTTP | ✅ | `Authorization: Bearer <token>` header on all requests |
+| Streamable HTTP | ✅ | `Authorization: Bearer <token>` injected on every request from the stored token |
 | Stdio | ❌ | Subprocess inherits environment; set env vars in config |
 | Demo | ❌ | No auth needed |
+
+The streamable-HTTP transport loads the stored token and attaches an
+`Authorization: Bearer <token>` header to every request automatically — no
+per-call flags needed. Both `http` and `https` endpoints are supported; HTTPS
+connections use TLS via `rustls` with the `webpki` root certificates, so a
+production endpoint like `https://mcp.example.com/email` works out of the box.
 
 For stdio servers that need authentication, pass credentials via environment:
 

@@ -113,13 +113,13 @@ server needed.
 mcp2cli config init --name local \
   --transport stdio \
   --stdio-command npx \
-  --stdio-args '@modelcontextprotocol/server-everything'
+  --stdio-arg '@modelcontextprotocol/server-everything'
 
 # Python MCP server
 mcp2cli config init --name pyserver \
   --transport stdio \
   --stdio-command python \
-  --stdio-args my_mcp_server.py
+  --stdio-arg my_mcp_server.py
 
 # Rust MCP server
 mcp2cli config init --name rustserver \
@@ -152,8 +152,8 @@ server:
 auto-groups them into nested subcommands.
 
 ```bash
-# Server exposes: email.send, email.reply, email.draft.create,
-#                 email.draft.list, email.labels.list, email.labels.add
+# Server exposes: send, reply, draft.create,
+#                 draft.list, labels.list, labels.add
 
 email --help
 # COMMANDS:
@@ -189,27 +189,27 @@ automation pipelines.
 
 ```bash
 # Get capabilities as JSON
-work --json ls | jq '.data.items[].id'
+email --json ls | jq '.data.items[].id'
 
 # Call a tool and extract result
-RESULT=$(work --json get-user --id 123 | jq -r '.data.result')
-echo "User: $RESULT"
+RESULT=$(email --json search --query "from:boss" | jq -r '.data.result')
+echo "Result: $RESULT"
 
 # Check auth status programmatically
-AUTH_STATE=$(work --json auth status | jq -r '.data.auth_session.state')
+AUTH_STATE=$(email --json auth status | jq -r '.data.auth_session.state')
 if [ "$AUTH_STATE" != "authenticated" ]; then
   echo "Not authenticated, logging in..."
-  work auth login
+  email auth login
 fi
 
 # Parse doctor output
-work --json doctor | jq '{server: .data.server, auth: .data.auth_session.state}'
+email --json doctor | jq '{server: .data.server, auth: .data.auth_session.state}'
 ```
 
 ### NDJSON for streaming
 
 ```bash
-work --output ndjson long-running-task --steps 10 |
+email --output ndjson search --query "before:2025-01-01" |
   while IFS= read -r line; do
     echo "$line" | jq -c '{type: .type, message: .message}'
   done
@@ -219,18 +219,18 @@ work --output ndjson long-running-task --steps 10 |
 
 ```bash
 # Discover, validate, then execute
-work doctor && work ls && work deploy --env staging
+email doctor && email ls && email send --to team@example.com --subject "Status" --body "OK"
 
 # Batch operations
-for user_id in 1 2 3 4 5; do
-  work --json get-user --id "$user_id" >> users.jsonl
+for thread_id in 1 2 3 4 5; do
+  email --json reply --thread-id "$thread_id" --body "Thanks" >> replies.jsonl
 done
 
 # Conditional execution
-if work --json ls | jq -e '.data.items[] | select(.id == "deploy")' > /dev/null; then
-  work deploy --version latest
+if email --json ls | jq -e '.data.items[] | select(.id == "send")' > /dev/null; then
+  email send --to team@example.com --subject "Report" --body "Done"
 else
-  echo "Server does not have deploy capability"
+  echo "Server does not have send capability"
 fi
 ```
 
@@ -238,13 +238,13 @@ fi
 
 ```bash
 # Fire multiple background jobs
-for dataset in sales marketing engineering; do
-  work analyze --dataset "$dataset" --background
+for team in sales marketing engineering; do
+  email send --to "$team@example.com" --subject "Report" --body "..." --background
 done
 
 # Wait for all to complete
-work jobs list | grep running | while read -r job_id rest; do
-  work jobs wait "$job_id"
+email jobs list | grep running | while read -r job_id rest; do
+  email jobs wait "$job_id"
 done
 ```
 
@@ -258,24 +258,24 @@ analysis, data processing, batch imports.
 ### Start a background job
 
 ```bash
-work analyze-dataset --dataset q4-2025 --background
+email search --query "label:archive" --background
 # → Job created: job-abc-123
 ```
 
 ### Monitor progress
 
 ```bash
-work jobs watch --latest          # Watch live progress events
-work jobs show --latest           # Poll status
-work jobs show job-abc-123
-work jobs wait --latest           # Block until done
+email jobs watch --latest          # Watch live progress events
+email jobs show --latest           # Poll status
+email jobs show job-abc-123
+email jobs wait --latest           # Block until done
 ```
 
 ### Manage jobs
 
 ```bash
-work jobs list
-work jobs cancel job-abc-123
+email jobs list
+email jobs cancel job-abc-123
 ```
 
 ### Cross-session persistence
@@ -284,12 +284,12 @@ Jobs persist on disk — you can exit the terminal and check results later:
 
 ```bash
 # In one terminal:
-work big-import --background
+email send --to all-staff@example.com --subject "Newsletter" --body "..." --background
 
 # Later, in another terminal:
-work jobs show --latest
+email jobs show --latest
 # status: completed
-# result: "Imported 50,000 records"
+# result: "Delivered to 50,000 recipients"
 ```
 
 ---
@@ -302,27 +302,25 @@ type inline.
 ### JSON-typed flags
 
 ```bash
-work configure \
-  --labels '["production","us-west"]' \
-  --limits '{"cpu":"2","memory":"4Gi"}'
+email send \
+  --to '["alice@example.com","bob@example.com"]' \
+  --headers '{"X-Priority":"1","Reply-To":"team@example.com"}'
 ```
 
 ### File-based payloads
 
 ```bash
-cat > deploy-config.json << 'EOF'
+cat > message.json << 'EOF'
 {
-  "environment": "production",
-  "config": {
-    "replicas": 5,
-    "image": "myapp:2.1.0",
-    "labels": ["production", "us-west"],
-    "resources": { "cpu": "1", "memory": "2Gi" }
-  }
+  "to": "team@example.com",
+  "subject": "Quarterly report",
+  "body": "See attached summary.",
+  "labels": ["reports", "q4"],
+  "headers": { "X-Priority": "1", "Reply-To": "ops@example.com" }
 }
 EOF
 
-work deploy --args-file deploy-config.json
+email send --args-file message.json
 ```
 
 ### Layered overrides
@@ -330,10 +328,10 @@ work deploy --args-file deploy-config.json
 Combine argument sources — they merge with later sources winning:
 
 ```bash
-work deploy \
-  --args-file deploy-config.json \
-  --args-json '{"config":{"replicas":10}}' \
-  --environment canary
+email send \
+  --args-file message.json \
+  --args-json '{"labels":["reports","q4","urgent"]}' \
+  --subject "Quarterly report (revised)"
 ```
 
 ---
@@ -344,7 +342,7 @@ work deploy \
 needs confirmation, credentials, or details it can't determine upfront.
 
 ```bash
-work trigger-deployment
+email send --to all-staff@example.com --subject "Company update"
 ```
 
 The server sends an `elicitation/create` request. mcp2cli prompts
@@ -352,11 +350,11 @@ interactively:
 
 ```text
 --- elicitation request ---
-Deployment requires additional confirmation:
-  Target region (AWS region) [required]: us-east-1
-  Confirm (yes/no) [required]: yes
-  Max instances [default: 3]:
-  Tags [comma-separated]: prod,web,v2
+Sending to a large distribution list requires additional confirmation:
+  Confirm bulk send (yes/no) [required]: yes
+  Schedule send for (ISO time) [default: now]:
+  Reply-to address [required]: ops@example.com
+  Labels [comma-separated]: announce,all-staff,2026
 --- end elicitation ---
 ```
 
@@ -400,12 +398,12 @@ command exec for custom integrations.
 During tool calls, the server may send real-time notifications:
 
 ```bash
-$ work analyze-dataset --dataset q4-2025
-[work] analyze-1 1/5 Loading dataset...
-[work] analyze-1 2/5 Parsing records...
-[work] server debug (db): Query executed in 42ms
-[work] analyze-1 3/5 Computing aggregates...
-[work] analyze-1 5/5 Complete
+$ email search --query "before:2025-01-01"
+[email] search-1 1/5 Scanning mailbox...
+[email] search-1 2/5 Matching messages...
+[email] server debug (db): Query executed in 42ms
+[email] search-1 3/5 Ranking results...
+[email] search-1 5/5 Complete
 ```
 
 Progress notifications (`notifications/progress`), log messages
@@ -456,8 +454,8 @@ curl -N http://127.0.0.1:9091
 When the server signals that its tool/resource/prompt list has changed:
 
 ```bash
-$ work long-running-task
-[work] server tools have changed; run 'ls' to refresh
+$ email search --query "label:archive"
+[email] server tools have changed; run 'ls' to refresh
 ```
 
 A stale marker file is written so the next `ls` command forces a live
@@ -471,21 +469,21 @@ re-discovery instead of using the cache.
 sends `sampling/createMessage` to the client.
 
 ```bash
-$ work generate-code --spec api-spec.yaml
+$ email compose-reply --thread-id th_123 --style professional
 --- sampling request ---
 The server requests a model response.
-Model hint: claude-3-5-sonnet
-System: You are an expert code generator
+Model hint: claude-sonnet-4-5
+System: You are an expert email assistant
 Max tokens: 2000
 
 Messages:
-  [user] Generate a REST controller for the given API spec
+  [user] Draft a professional reply to the latest message in this thread
 
-Your response (or 'decline' to reject): Here is the controller implementation...
+Your response (or 'decline' to reject): Thank you for the update — here is my reply...
 --- end sampling ---
 
-title: Code Generation
-result: Generated src/controllers/api.ts
+title: Compose Reply
+result: Drafted reply for thread th_123
 ```
 
 mcp2cli advertises `sampling` capability during initialization. The user
@@ -514,9 +512,9 @@ capabilities are available.
 
 ```bash
 # These work even when the server is down (from cache)
-work ls
-work ls --tools
-work ls --resources
+email ls
+email ls --tools
+email ls --resources
 ```
 
 ### What works offline
@@ -594,35 +592,34 @@ hiding internal tools, grouping related commands.
 ### Add a profile
 
 ```yaml
-# In configs/work.yaml
+# In configs/email.yaml
 profile:
-  display_name: "Work Toolkit"
+  display_name: "Email Toolkit"
   aliases:
-    long-running-operation: lro
-    get-tiny-image: image
-    annotated-message: annotate
+    draft.create: compose
+    labels.add: tag
+    labels.list: tags
   hide:
-    - print-env
     - debug-probe
+    - print-env
   groups:
-    analysis:
-      - analyze-data
-      - generate-report
-      - export-csv
+    drafts:
+      - draft.create
+      - draft.list
   flags:
-    echo:
-      message: msg
+    send:
+      to: recipient
   resource_verb: fetch
 ```
 
 ### Result
 
 ```bash
-work echo --msg hello          # Renamed flag
-work lro --duration 5          # Shortened command name
-work image                     # Friendly name
-work analysis analyze-data ... # Custom grouping
-work fetch demo://resource/... # Custom resource verb
+email send --recipient hello@example.com   # Renamed flag
+email compose --subject "WIP"              # Shortened command name
+email tag --message-id msg_456 --label hot # Friendly name
+email drafts draft.create ...              # Custom grouping
+email fetch mail://inbox                   # Custom resource verb
 ```
 
 ---
@@ -731,12 +728,12 @@ auth, or capability issues.
 ### Doctor
 
 ```bash
-work doctor
+email doctor
 ```
 
 Output:
 ```yaml
-config: work
+config: email
 profile: bridge
 transport: streamable_http
 server: my-server 2.1.0
@@ -748,7 +745,7 @@ inventory: 14 tools, 3 resources, 2 prompts cached
 ### Inspect
 
 ```bash
-work inspect
+email inspect
 ```
 
 Full server capability response: protocol version, capabilities, server info.
@@ -756,7 +753,7 @@ Full server capability response: protocol version, capabilities, server info.
 ### Ping
 
 ```bash
-work ping
+email ping
 ```
 
 Server liveness check with latency measurement.
@@ -764,14 +761,14 @@ Server liveness check with latency measurement.
 ### Verbose logging
 
 ```bash
-MCP2CLI_LOGGING__LEVEL=debug work echo --message test 2>debug.log
-MCP2CLI_LOGGING__LEVEL=trace work doctor 2>trace.log
+MCP2CLI_LOGGING__LEVEL=debug email send --to user@example.com --subject test --body hi 2>debug.log
+MCP2CLI_LOGGING__LEVEL=trace email doctor 2>trace.log
 ```
 
 ### Auth debugging
 
 ```bash
-work auth status
+email auth status
 ```
 
 ---
@@ -784,24 +781,24 @@ become first-class commands.
 ### Single-parameter templates → positional argument
 
 ```bash
-# Template: greeting/{name}
-work greeting Alice
-# → resources/read with URI: greeting/Alice
+# Template: mail://message/{id}
+email message msg_789
+# → resources/read with URI: mail://message/msg_789
 ```
 
 ### Multi-parameter templates → flags
 
 ```bash
 # Template: mail://search?q={query}&folder={folder}
-work mail-search --query invoice --folder inbox
+email mail-search --query invoice --folder inbox
 # → resources/read with URI: mail://search?q=invoice&folder=inbox
 ```
 
 ### Concrete resources via `get`
 
 ```bash
-work get "demo://resource/readme.md"
-work get "demo://resource/static/document/architecture.md"
+email get "mail://thread/123"
+email get "mail://message/msg_789"
 ```
 
 ---
@@ -812,14 +809,14 @@ work get "demo://resource/static/document/architecture.md"
 
 ```bash
 # Request completions for a tool argument
-work complete ref/tool echo message "hel"
+email complete ref/tool send to "use"
 
 # Complete a prompt argument
-work complete ref/prompt compose-reply style "prof"
+email complete ref/prompt compose-reply style "prof"
 
 # Set server log level
-work log debug
-work log info
+email log debug
+email log info
 ```
 
 ---
@@ -888,7 +885,7 @@ mcp2cli use everything
 mcp2cli config init --name everything-stdio \
   --transport stdio \
   --stdio-command npx \
-  --stdio-args '@modelcontextprotocol/server-everything'
+  --stdio-arg '@modelcontextprotocol/server-everything'
 mcp2cli use everything-stdio
 
 # Discover and use
@@ -924,8 +921,8 @@ file, a database table, or a monitoring endpoint — without polling.
 ### Subscribe to a resource
 
 ```bash
-work subscribe "file:///project/config.yaml"
-work subscribe "db://tables/users"
+email subscribe "mail://inbox"
+email subscribe "mail://thread/123"
 ```
 
 The server will send `notifications/resources/updated` whenever the resource
@@ -942,19 +939,19 @@ curl -N http://127.0.0.1:9091
 ### Unsubscribe when done
 
 ```bash
-work unsubscribe "file:///project/config.yaml"
+email unsubscribe "mail://inbox"
 ```
 
 ### Automation: react to resource changes
 
 ```bash
 # Watch for updates and re-read when they arrive
-work subscribe "config://app/settings"
+email subscribe "mail://inbox"
 
 # In another terminal, watch the SSE stream:
 curl -sN http://127.0.0.1:9091 | while IFS= read -r line; do
   if echo "$line" | grep -q "resource updated"; then
-    work --json get "config://app/settings" >> config-history.jsonl
+    email --json get "mail://inbox" >> inbox-history.jsonl
   fi
 done
 ```
@@ -1033,7 +1030,7 @@ result later — even from a different terminal session.
 ### Start a background task
 
 ```bash
-work analyze-dataset --dataset q4-2025 --background
+email send --to all-staff@example.com --subject "Newsletter" --body "..." --background
 # → Task accepted (task-abc-123)
 # Job created: job-1
 ```
@@ -1045,38 +1042,38 @@ of blocking.
 ### Check task status
 
 ```bash
-work jobs show --latest
+email jobs show --latest
 # Queries tasks/get on the server for live status:
 #   job-1: task-abc-123
 #   status: working
-#   message: "Processing 50,000 records..."
+#   message: "Delivering to 50,000 recipients..."
 ```
 
 ### Wait for completion
 
 ```bash
-work jobs wait --latest
+email jobs wait --latest
 # Polls tasks/get every 2 seconds
 # When complete, calls tasks/result for the final output:
 #   status: completed
-#   result: { "records_processed": 50000, "errors": 0 }
+#   result: { "delivered": 50000, "errors": 0 }
 ```
 
 ### Watch live status
 
 ```bash
-work jobs watch --latest
+email jobs watch --latest
 # Polls every 1 second, prints each status change:
-#   [job-1] working — Loading dataset...
-#   [job-1] working — Processing records (25,000/50,000)...
-#   [job-1] working — Computing aggregates...
+#   [job-1] working — Resolving distribution list...
+#   [job-1] working — Delivering messages (25,000/50,000)...
+#   [job-1] working — Finalizing receipts...
 #   [job-1] completed
 ```
 
 ### Cancel a running task
 
 ```bash
-work jobs cancel --latest
+email jobs cancel --latest
 # Sends tasks/cancel to the server
 # → task-abc-123 cancelled
 ```
@@ -1087,22 +1084,22 @@ Tasks persist on disk. Start in one terminal, check from another:
 
 ```bash
 # Terminal 1:
-work train-model --epochs 100 --background
+email search --query "before:2025-01-01" --background
 
 # Terminal 2 (later, even after Terminal 1 closed):
-work jobs show --latest
-work jobs wait --latest
+email jobs show --latest
+email jobs wait --latest
 ```
 
 ### CI/CD with tasks
 
 ```bash
-# Start a long deployment as a task
-work deploy --image myapp:2.0 --environment staging --background
+# Start a long bulk send as a task
+email send --to all-staff@example.com --subject "Release notes" --body "..." --background
 
 # Poll until complete
-work jobs wait --latest
-STATUS=$(work --json jobs show --latest | jq -r '.data.status')
+email jobs wait --latest
+STATUS=$(email --json jobs show --latest | jq -r '.data.status')
 [ "$STATUS" = "completed" ] || exit 1
 ```
 
@@ -1121,7 +1118,7 @@ requests:
 
 ```bash
 # Start a long tool call
-work process-batch --size 1000000
+email send --to all-staff@example.com --subject "Bulk" --body "..."
 
 # Press Ctrl+C — mcp2cli sends notifications/cancelled to the server
 # The server can then abort the operation gracefully
@@ -1134,18 +1131,18 @@ or sampling request), mcp2cli handles the `notifications/cancelled`
 notification and logs the reason:
 
 ```json
-[work] request cancelled by server: timeout exceeded
+[email] request cancelled by server: timeout exceeded
 ```
 
 ### Programmatic cancellation
 
 ```bash
 # Start a background job
-work big-export --background
-JOB_ID=$(work --json jobs list | jq -r '.data.jobs[-1].id')
+email search --query "before:2025-01-01" --background
+JOB_ID=$(email --json jobs list | jq -r '.data.jobs[-1].id')
 
 # Cancel it
-work jobs cancel "$JOB_ID"
+email jobs cancel "$JOB_ID"
 # Sends tasks/cancel → notifications/cancelled to the server
 ```
 
