@@ -611,8 +611,19 @@ pub fn parse_dynamic(
             let (jobs_sub, jobs_matches) = sub_matches
                 .subcommand()
                 .ok_or_else(|| anyhow!("jobs requires a subcommand"))?;
-            let job_id = jobs_matches.get_one::<String>("job_id").cloned();
-            let latest = jobs_matches.get_flag("latest");
+            // `jobs list` defines neither arg; read them panic-safely so the
+            // shared extraction works for every jobs subcommand.
+            let job_id = jobs_matches
+                .try_get_one::<String>("job_id")
+                .ok()
+                .flatten()
+                .cloned();
+            let latest = jobs_matches
+                .try_get_one::<bool>("latest")
+                .ok()
+                .flatten()
+                .copied()
+                .unwrap_or(false);
             match jobs_sub {
                 "list" => DynamicCommand::JobsList,
                 "show" => DynamicCommand::JobsShow { job_id, latest },
@@ -2031,6 +2042,25 @@ mod tests {
             sub_matches.get_one::<String>("uri").map(String::as_str),
             Some("demo://resource/readme.md")
         );
+    }
+
+    #[test]
+    fn parses_jobs_list_without_panicking() {
+        // Regression: `jobs list` defines neither job_id nor latest, so the
+        // shared arg extraction used to panic via clap's get_one/get_flag.
+        let manifest = test_manifest();
+        let result = parse_dynamic(
+            &[
+                OsString::from("email"),
+                OsString::from("jobs"),
+                OsString::from("list"),
+            ],
+            "email",
+            &manifest,
+            "Test Server",
+        )
+        .expect("jobs list should parse");
+        assert!(matches!(result.command, DynamicCommand::JobsList));
     }
 
     #[test]

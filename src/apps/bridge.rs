@@ -446,9 +446,14 @@ fn bridge_command(invoked_as: &str) -> clap::Command {
         .bin_name(invoked_as)
         .version(env!("CARGO_PKG_VERSION"))
         .after_help(if invoked_as == crate::dispatch::HOST_BINARY_NAME {
-            "Examples:\n  mcp2cli tool list\n  mcp2cli tool call echo --arg message=hello\n  mcp2cli resource list\n  mcp2cli resource read demo://resource/readme.md\n  mcp2cli prompt list\n  mcp2cli prompt run simple-prompt\n  mcp2cli tool call tasks.run --args-file ./payload.json --background\n  mcp2cli auth status\n  mcp2cli jobs list\n  mcp2cli inspect\n\nHost commands:\n  mcp2cli config list\n  mcp2cli use work"
+            "Examples:\n  mcp2cli tool list\n  mcp2cli tool call send --arg to=user@example.com\n  mcp2cli resource list\n  mcp2cli resource read mail://inbox\n  mcp2cli prompt list\n  mcp2cli prompt run triage\n  mcp2cli tool call search --args-file ./query.json --background\n  mcp2cli auth status\n  mcp2cli jobs list\n  mcp2cli inspect\n\nHost commands:\n  mcp2cli config list\n  mcp2cli use email".to_owned()
         } else {
-            "Examples:\n  work tool list\n  work tool call echo --arg message=hello\n  work resource list\n  work resource read demo://resource/readme.md\n  work prompt list\n  work prompt run simple-prompt\n  work tool call tasks.run --args-file ./payload.json --background\n  work auth status\n  work jobs list\n  work inspect"
+            // Use the alias the binary was actually invoked as, so `email --help`
+            // shows `email …` examples rather than a hardcoded sample name.
+            format!(
+                "Examples:\n  {a} tool list\n  {a} tool call send --arg to=user@example.com\n  {a} resource list\n  {a} resource read mail://inbox\n  {a} prompt list\n  {a} prompt run triage\n  {a} tool call search --args-file ./query.json --background\n  {a} auth status\n  {a} jobs list\n  {a} inspect",
+                a = invoked_as
+            )
         });
     command
 }
