@@ -1,3 +1,19 @@
+## 0.1.5 (2026-06-10)
+
+### Fixes
+
+- **auth,transport:** send bearer token over HTTPS and honor CI flags
+- **cli:** stop `jobs list` panicking and show the real alias in help
+- **cli:** render dynamic --help/--version instead of falling through
+
+### Docs
+
+- rename `work` sample to `email` app alias and fix CLI/auth/transport drift
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.4 (2026-04-19)
 
 ### Fixes
