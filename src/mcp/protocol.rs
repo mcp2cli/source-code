@@ -389,9 +389,7 @@ fn map_operation_to_request(request_id: u64, operation: &McpOperation) -> Result
             });
             // When background is true, request task augmentation so the
             // server returns a task ID immediately instead of blocking.
-            if *background
-                && let Some(params_obj) = params.as_object_mut()
-            {
+            if *background && let Some(params_obj) = params.as_object_mut() {
                 let meta = params_obj.entry("_meta").or_insert_with(|| json!({}));
                 if let Some(meta_obj) = meta.as_object_mut() {
                     meta_obj.insert("task".to_owned(), json!({}));

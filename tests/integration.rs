@@ -346,9 +346,8 @@ fn stdio_auth_login_accepts_input_json() {
         .output()
         .expect("command should run");
     assert!(output.status.success());
-    let parsed: serde_json::Value =
-        serde_json::from_str(&String::from_utf8_lossy(&output.stdout))
-            .expect("output should be valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&output.stdout))
+        .expect("output should be valid JSON");
     assert_eq!(parsed["data"]["state"], "authenticated");
     assert_eq!(parsed["data"]["account"], "ci@example.com");
 }

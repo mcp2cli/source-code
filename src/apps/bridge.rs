@@ -653,9 +653,10 @@ fn apply_ci_flags(
 ) -> Result<()> {
     context.non_interactive = non_interactive;
     context.input_json = match input_json {
-        Some(raw) => Some(serde_json::from_str(raw).map_err(|error| {
-            anyhow!("--input-json is not valid JSON: {}", error)
-        })?),
+        Some(raw) => Some(
+            serde_json::from_str(raw)
+                .map_err(|error| anyhow!("--input-json is not valid JSON: {}", error))?,
+        ),
         None => None,
     };
     crate::mcp::handler::set_interaction_config(crate::mcp::handler::InteractionConfig {

@@ -2098,13 +2098,14 @@ mod tests {
 
     #[test]
     fn streamable_http_client_rejects_non_http_scheme() {
-        let error =
-            StreamableHttpMcpClient::new("work".to_owned(), "ftp://example.com/mcp".to_owned(), None)
-                .expect_err("non http(s) scheme should fail");
+        let error = StreamableHttpMcpClient::new(
+            "work".to_owned(),
+            "ftp://example.com/mcp".to_owned(),
+            None,
+        )
+        .expect_err("non http(s) scheme should fail");
         assert!(
-            error
-                .to_string()
-                .contains("must use http or https"),
+            error.to_string().contains("must use http or https"),
             "unexpected error: {error}"
         );
     }
@@ -2143,7 +2144,9 @@ mod tests {
             }
         }
         let _ = socket
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
+            )
             .await;
         let _ = socket.flush().await;
         String::from_utf8_lossy(&buf).into_owned()
