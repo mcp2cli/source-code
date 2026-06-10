@@ -24,6 +24,13 @@
         "command": "cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings"
       },
       "cache": false
+    },
+    "nx-release-publish": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'mcp2cli is a Rust crate — publishing to crates.io is handled by the release-binaries workflow after the binary matrix passes. The nx publish step is intentionally a no-op so `nx release` does not fail looking for an nx-release-publish target.'"
+      },
+      "cache": false
     }
   },
   "release": {
