@@ -562,7 +562,11 @@ pub fn parse_dynamic(
                 | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
                 | clap::error::ErrorKind::DisplayVersion
         ) {
-            anyhow!("{}", e)
+            // Preserve the typed clap error so the caller can render the
+            // dynamic help/version itself. Falling through to the static
+            // bridge here would mishandle dynamic-only commands (ls, ping,
+            // log, complete, subscribe) as "unrecognized subcommand".
+            e.into()
         } else {
             // Try fuzzy suggestion for unknown subcommands
             let err_msg = e.to_string();
@@ -2042,6 +2046,32 @@ mod tests {
             sub_matches.get_one::<String>("uri").map(String::as_str),
             Some("demo://resource/readme.md")
         );
+    }
+
+    #[test]
+    fn help_request_preserves_clap_error_for_rendering() {
+        // The bridge relies on parse_dynamic surfacing a typed clap DisplayHelp
+        // error (rather than a stringified one) so it can render the dynamic
+        // help instead of falling through to the static bridge — which would
+        // mishandle dynamic-only commands like `ls` as "unrecognized".
+        let manifest = test_manifest();
+        let err = match parse_dynamic(
+            &[
+                OsString::from("email"),
+                OsString::from("ls"),
+                OsString::from("--help"),
+            ],
+            "email",
+            &manifest,
+            "Test Server",
+        ) {
+            Ok(_) => panic!("--help should surface as an error signal"),
+            Err(err) => err,
+        };
+        let clap_err = err
+            .downcast::<clap::Error>()
+            .expect("help signal must stay a typed clap error");
+        assert_eq!(clap_err.kind(), clap::error::ErrorKind::DisplayHelp);
     }
 
     #[test]

@@ -613,8 +613,26 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
                     Err(e) => return Err(e),
                 }
             }
-            Err(_) => {
-                // Dynamic parse failed — fall through to static bridge
+            Err(err) => {
+                // A `--help`/`--version` request against the dynamic surface is
+                // rendered here. Falling through to the static bridge (which
+                // lacks dynamic-only commands like `ls`/`ping`/`log`/`complete`/
+                // `subscribe`) would otherwise print a misleading
+                // "unrecognized subcommand" error for those.
+                match err.downcast::<clap::Error>() {
+                    Ok(clap_error)
+                        if matches!(
+                            clap_error.kind(),
+                            ErrorKind::DisplayHelp
+                                | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                                | ErrorKind::DisplayVersion
+                        ) =>
+                    {
+                        return Ok(help_report(output_format, &context, clap_error));
+                    }
+                    // Any other parse failure falls through to the static bridge.
+                    _ => {}
+                }
             }
         }
     }
