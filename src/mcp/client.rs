@@ -48,6 +48,7 @@ use bytes::Bytes;
 use http::{Method, Request, StatusCode, header};
 use http_body_util::{BodyExt, Full};
 use hyper::Uri;
+use hyper_rustls::HttpsConnector;
 use hyper_util::{
     client::legacy::{Client as HyperClient, connect::HttpConnector},
     rt::TokioExecutor,
@@ -75,7 +76,7 @@ use crate::{
         DEFAULT_MCP_PROTOCOL_VERSION, InitializeResult, JsonRpcError, JsonRpcNotification,
         JsonRpcRequest, JsonRpcResponse, McpClientSession, ProtocolEngine,
     },
-    runtime::{EventBroker, RuntimeEvent},
+    runtime::{EventBroker, RuntimeEvent, TokenStore},
 };
 
 #[async_trait]
@@ -169,12 +170,42 @@ pub async fn build_client(
         ClientMode::StreamableHttp => {
             let config =
                 config.ok_or_else(|| anyhow!("missing config for streamable HTTP MCP client"))?;
+            let bearer_token = load_bearer_token(layout, config).await;
             Ok(Box::new(StreamableHttpMcpClient::new(
                 config.name.clone(),
                 config.config.server.endpoint.clone().ok_or_else(|| {
                     anyhow!("server.endpoint must be set for streamable HTTP transport")
                 })?,
+                bearer_token,
             )?))
+        }
+    }
+}
+
+/// Read the stored bearer token for a config from the same token-store file the
+/// `auth login` command writes to. Returns `None` when no token is stored (or the
+/// store can't be read) so unauthenticated servers keep working unchanged.
+async fn load_bearer_token(layout: &RuntimeLayout, config: &ResolvedAppConfig) -> Option<String> {
+    let token_path = config
+        .config
+        .auth
+        .token_store_file
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| layout.token_store_path(&config.name));
+    if !token_path.exists() {
+        return None;
+    }
+    let store = TokenStore::new(token_path);
+    match store.get(&config.name).await {
+        Ok(token) => token.map(|stored| stored.bearer_token),
+        Err(error) => {
+            tracing::warn!(
+                config = %config.name,
+                %error,
+                "failed to read token store for bearer auth; proceeding unauthenticated"
+            );
+            None
         }
     }
 }
@@ -247,10 +278,13 @@ pub struct StreamableHttpMcpClient {
     config_name: String,
     endpoint: Url,
     endpoint_uri: Uri,
-    client: HyperClient<HttpConnector, Full<Bytes>>,
+    client: HyperClient<HttpsConnector<HttpConnector>, Full<Bytes>>,
     protocol: ProtocolEngine,
     session: Mutex<McpClientSession>,
     next_request_id: Mutex<u64>,
+    /// Bearer token injected as `Authorization: Bearer <token>` on every
+    /// request when present (populated from the token store at build time).
+    bearer_token: Option<String>,
 }
 
 impl StdioMcpClient {
@@ -468,13 +502,17 @@ impl StdioMcpClient {
 }
 
 impl StreamableHttpMcpClient {
-    pub fn new(config_name: String, endpoint: String) -> Result<Self> {
+    pub fn new(
+        config_name: String,
+        endpoint: String,
+        bearer_token: Option<String>,
+    ) -> Result<Self> {
         let endpoint = Url::parse(&endpoint).map_err(|error| {
             anyhow!("invalid streamable HTTP endpoint '{}': {}", endpoint, error)
         })?;
-        if endpoint.scheme() != "http" {
+        if !matches!(endpoint.scheme(), "http" | "https") {
             return Err(anyhow!(
-                "streamable HTTP client currently supports plain http endpoints only; got '{}'",
+                "streamable HTTP endpoint must use http or https; got '{}'",
                 endpoint.scheme()
             ));
         }
@@ -485,7 +523,14 @@ impl StreamableHttpMcpClient {
                 error
             )
         })?;
-        let connector = HttpConnector::new();
+        // Accept both plain http (local/dev servers) and https (anything real,
+        // and required whenever a bearer token is sent). Roots come from the
+        // bundled webpki set so the binary needs no system trust store.
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_or_http()
+            .enable_http1()
+            .build();
         let client = HyperClient::builder(TokioExecutor::new()).build(connector);
         let protocol = ProtocolEngine::new(
             DEFAULT_MCP_PROTOCOL_VERSION,
@@ -502,6 +547,7 @@ impl StreamableHttpMcpClient {
             protocol,
             session,
             next_request_id: Mutex::new(1),
+            bearer_token,
         })
     }
 
@@ -570,6 +616,9 @@ impl StreamableHttpMcpClient {
         }
         if let Some(session_id) = &session.session_id {
             builder = builder.header("mcp-session-id", session_id.as_str());
+        }
+        if let Some(token) = &self.bearer_token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {}", token));
         }
 
         let request = builder
@@ -1426,6 +1475,9 @@ fn map_discovery_response(
     category: &DiscoveryCategory,
     response: JsonRpcResponse,
 ) -> Result<McpOperationResult> {
+    if let Some(error) = response.error {
+        return Err(anyhow!("discovery failed: {}", error.message));
+    }
     let result = response
         .result
         .ok_or_else(|| anyhow!("json-rpc discovery response did not contain a result"))?;
@@ -1562,6 +1614,9 @@ fn map_tool_call_response(
     _background: bool,
     response: JsonRpcResponse,
 ) -> Result<McpOperationResult> {
+    if let Some(error) = response.error {
+        return Err(anyhow!("tools/call failed: {}", error.message));
+    }
     let result = response
         .result
         .ok_or_else(|| anyhow!("json-rpc tools/call response did not contain a result"))?;
@@ -1605,6 +1660,9 @@ fn map_tool_call_response(
 }
 
 fn map_resource_read_response(uri: &str, response: JsonRpcResponse) -> Result<McpOperationResult> {
+    if let Some(error) = response.error {
+        return Err(anyhow!("resources/read failed: {}", error.message));
+    }
     let result = response
         .result
         .ok_or_else(|| anyhow!("json-rpc resources/read response did not contain a result"))?;
@@ -1652,6 +1710,9 @@ fn map_prompt_get_response(
     arguments: &Value,
     response: JsonRpcResponse,
 ) -> Result<McpOperationResult> {
+    if let Some(error) = response.error {
+        return Err(anyhow!("prompts/get failed: {}", error.message));
+    }
     let result = response
         .result
         .ok_or_else(|| anyhow!("json-rpc prompts/get response did not contain a result"))?;
@@ -2016,7 +2077,7 @@ mod tests {
 
     #[test]
     fn streamable_http_client_rejects_invalid_endpoint() {
-        let error = StreamableHttpMcpClient::new("work".to_owned(), "not a url".to_owned())
+        let error = StreamableHttpMcpClient::new("work".to_owned(), "not a url".to_owned(), None)
             .expect_err("invalid endpoint should fail");
         assert!(
             error
@@ -2026,11 +2087,26 @@ mod tests {
     }
 
     #[test]
-    fn streamable_http_client_rejects_https_for_now() {
+    fn streamable_http_client_accepts_https() {
+        StreamableHttpMcpClient::new(
+            "work".to_owned(),
+            "https://example.com/mcp".to_owned(),
+            Some("tok-abc".to_owned()),
+        )
+        .expect("https endpoints should build");
+    }
+
+    #[test]
+    fn streamable_http_client_rejects_non_http_scheme() {
         let error =
-            StreamableHttpMcpClient::new("work".to_owned(), "https://example.com/mcp".to_owned())
-                .expect_err("https should fail for now");
-        assert!(error.to_string().contains("plain http endpoints only"));
+            StreamableHttpMcpClient::new("work".to_owned(), "ftp://example.com/mcp".to_owned(), None)
+                .expect_err("non http(s) scheme should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("must use http or https"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -2044,11 +2120,95 @@ mod tests {
         );
     }
 
+    /// Accept one HTTP request on a localhost port, capture the raw request
+    /// head (request line + headers), reply with a minimal 200, and return
+    /// the captured bytes. Used to assert transport headers without standing
+    /// up a full MCP server.
+    async fn capture_one_http_request(listener: tokio::net::TcpListener) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut socket, _) = listener.accept().await.expect("accept connection");
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 1024];
+        // Read until we've seen the end of the headers; the canned request
+        // bodies in these tests are tiny so a single small read suffices, but
+        // loop to be robust against TCP fragmentation.
+        loop {
+            let n = socket.read(&mut chunk).await.expect("read request");
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let _ = socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+            .await;
+        let _ = socket.flush().await;
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    #[tokio::test]
+    async fn streamable_http_client_sends_bearer_authorization_header() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(capture_one_http_request(listener));
+
+        let client = StreamableHttpMcpClient::new(
+            "work".to_owned(),
+            format!("http://{addr}/mcp"),
+            Some("tok-abc".to_owned()),
+        )
+        .expect("client should build");
+        let session = client.session.lock().await.clone();
+        client
+            .send_http_message(b"{}", &session, false)
+            .await
+            .expect("request should round-trip");
+
+        let request = server.await.expect("server task");
+        let lower = request.to_ascii_lowercase();
+        assert!(
+            lower.contains("authorization: bearer tok-abc"),
+            "expected bearer header in request, got:\n{request}"
+        );
+    }
+
+    #[tokio::test]
+    async fn streamable_http_client_omits_authorization_when_unauthenticated() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(capture_one_http_request(listener));
+
+        let client =
+            StreamableHttpMcpClient::new("work".to_owned(), format!("http://{addr}/mcp"), None)
+                .expect("client should build");
+        let session = client.session.lock().await.clone();
+        client
+            .send_http_message(b"{}", &session, false)
+            .await
+            .expect("request should round-trip");
+
+        let request = server.await.expect("server task");
+        assert!(
+            !request.to_ascii_lowercase().contains("authorization:"),
+            "did not expect an authorization header, got:\n{request}"
+        );
+    }
+
     #[tokio::test]
     async fn streamable_http_client_prepares_protocol_bootstrap_for_discovery() {
-        let client =
-            StreamableHttpMcpClient::new("work".to_owned(), "http://example.com/mcp".to_owned())
-                .expect("client should build");
+        let client = StreamableHttpMcpClient::new(
+            "work".to_owned(),
+            "http://example.com/mcp".to_owned(),
+            None,
+        )
+        .expect("client should build");
 
         let request_id = {
             let mut next_request_id = client.next_request_id.lock().await;

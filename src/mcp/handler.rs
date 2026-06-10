@@ -4,6 +4,7 @@
 
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,37 @@ use serde_json::{Number, Value, json};
 
 use crate::mcp::protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 use crate::runtime::{EventBroker, RuntimeEvent};
+
+// ---------------------------------------------------------------------------
+// Interaction config (CI-mode flags)
+// ---------------------------------------------------------------------------
+
+/// Process-wide interaction settings derived from the global `--non-interactive`
+/// and `--input-json` flags. Elicitation prompting reads process-global stdin
+/// directly, so the flags that govern it are likewise stored process-wide and
+/// installed once per invocation by the command dispatcher.
+#[derive(Debug, Clone, Default)]
+pub struct InteractionConfig {
+    /// Fail instead of blocking on interactive input.
+    pub non_interactive: bool,
+    /// Pre-supplied elicitation answers, keyed by field name.
+    pub input_json: Option<Value>,
+}
+
+static INTERACTION_CONFIG: OnceLock<InteractionConfig> = OnceLock::new();
+
+/// Install the process-wide interaction config. The first call wins; the flags
+/// are parsed once per process invocation so later calls (e.g. a delegated
+/// re-parse) carry identical values and are safely ignored.
+pub fn set_interaction_config(config: InteractionConfig) {
+    let _ = INTERACTION_CONFIG.set(config);
+}
+
+/// Read the installed interaction config, or the permissive default (interactive,
+/// no pre-supplied answers) when none was installed.
+pub fn interaction_config() -> InteractionConfig {
+    INTERACTION_CONFIG.get().cloned().unwrap_or_default()
+}
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -277,8 +309,19 @@ fn handle_form_elicitation(request: &JsonRpcRequest, params: &Value) -> Result<J
         .unwrap_or("The server is requesting input:");
     let schema = params.get("requestedSchema");
 
-    eprintln!("--- elicitation request ---");
-    eprintln!("{}", message);
+    let interaction = interaction_config();
+    let supplied = interaction
+        .input_json
+        .as_ref()
+        .and_then(Value::as_object)
+        .cloned();
+
+    // Only print the interactive banner when we will actually prompt.
+    let banner = !interaction.non_interactive && supplied.is_none();
+    if banner {
+        eprintln!("--- elicitation request ---");
+        eprintln!("{}", message);
+    }
 
     let mut content = serde_json::Map::new();
 
@@ -301,6 +344,29 @@ fn handle_form_elicitation(request: &JsonRpcRequest, params: &Value) -> Result<J
             let is_required = required.contains(&key.as_str());
             let prop_type = prop.get("type").and_then(Value::as_str).unwrap_or("string");
 
+            // 1. Pre-supplied answer via --input-json (used verbatim).
+            if let Some(answer) = supplied.as_ref().and_then(|map| map.get(key)) {
+                content.insert(key.clone(), answer.clone());
+                continue;
+            }
+
+            // 2. Non-interactive (or piped, no answers): fall back to the
+            //    schema default, or fail when a required field has no value.
+            if interaction.non_interactive || supplied.is_some() {
+                if let Some(default) = default_value {
+                    content.insert(key.clone(), default.clone());
+                } else if is_required {
+                    return Err(anyhow!(
+                        "--non-interactive set but elicitation field '{}' has no answer; \
+                         provide it via --input-json '{{\"{}\": ...}}'",
+                        key,
+                        key
+                    ));
+                }
+                continue;
+            }
+
+            // 3. Interactive prompt on the terminal.
             eprint!("  {}", title);
             if let Some(desc) = description {
                 eprint!(" ({})", desc);
@@ -336,7 +402,9 @@ fn handle_form_elicitation(request: &JsonRpcRequest, params: &Value) -> Result<J
         }
     }
 
-    eprintln!("--- end elicitation ---");
+    if banner {
+        eprintln!("--- end elicitation ---");
+    }
 
     Ok(JsonRpcResponse {
         jsonrpc: "2.0".to_owned(),
@@ -487,6 +555,24 @@ fn handle_url_elicitation(request: &JsonRpcRequest, params: &Value) -> Result<Js
         .get("url")
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("url mode elicitation missing 'url' field"))?;
+
+    // URL-mode elicitation is an out-of-band, human-in-the-loop flow. In CI
+    // mode there is no one to complete it, so decline immediately rather than
+    // blocking on terminal input.
+    if interaction_config().non_interactive {
+        eprintln!("--- url elicitation request ---");
+        eprintln!("{}", message);
+        eprintln!("The server asks you to open: {}", url);
+        eprintln!(
+            "--non-interactive set; declining url elicitation (cannot complete out-of-band flow in CI mode)."
+        );
+        return Ok(JsonRpcResponse {
+            jsonrpc: "2.0".to_owned(),
+            id: request.id.clone(),
+            result: Some(json!({ "action": "decline" })),
+            error: None,
+        });
+    }
 
     eprintln!("--- url elicitation request ---");
     eprintln!("{}", message);

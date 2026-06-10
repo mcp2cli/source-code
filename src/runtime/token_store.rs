@@ -83,7 +83,21 @@ impl TokenStore {
             serde_json::to_vec_pretty(data).context("failed to serialize token store data")?;
         fs::write(&self.path, &bytes)
             .await
-            .with_context(|| format!("failed to write token store: {}", self.path.display()))
+            .with_context(|| format!("failed to write token store: {}", self.path.display()))?;
+        // Bearer tokens / OAuth material must not be world- or group-readable.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to tighten token store permissions: {}",
+                        self.path.display()
+                    )
+                })?;
+        }
+        Ok(())
     }
 }
 
@@ -109,6 +123,28 @@ mod tests {
         let loaded = store.get("work").await.unwrap().unwrap();
         assert_eq!(loaded.bearer_token, "tok-abc");
         assert_eq!(loaded.account.as_deref(), Some("user@example.com"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn put_tightens_file_permissions_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("tokens.json");
+        let store = TokenStore::new(path.clone());
+        store
+            .put(
+                "work",
+                StoredToken {
+                    bearer_token: "secret".to_owned(),
+                    account: None,
+                    updated_at: Utc::now(),
+                },
+            )
+            .await
+            .unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "token store must be owner-only");
     }
 
     #[tokio::test]

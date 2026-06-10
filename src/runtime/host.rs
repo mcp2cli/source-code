@@ -161,6 +161,8 @@ impl RuntimeHost {
                 mcp_client: Arc::clone(&self.mcp_client),
             },
             timeout_override: None,
+            non_interactive: false,
+            input_json: None,
         };
         let report = bridge::execute(argv, context).await?;
         if let Some(session) = self.mcp_client.negotiated_session().await {

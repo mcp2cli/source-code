@@ -17,9 +17,10 @@
 //!   only tracks session metadata (state, last refresh, scopes).
 //! - **Job records** — for `--background` invocations,
 //!   [`JobRecord`]s persist job id, server-side task id, status,
-//!   start/update timestamps, and final result until the user
-//!   acknowledges with `jobs clear` or TTL expires. Enables
-//!   `jobs show/wait/cancel/watch` across invocations.
+//!   start/update timestamps, and final result so that
+//!   `jobs list/show/wait/cancel/watch` work across invocations.
+//!   Records are retained for the lifetime of the state file; there
+//!   is no automatic TTL eviction today.
 //!
 //! Storage is simple JSON files under the runtime data dir
 //! ([`crate::config::RuntimeLayout`]). Writes are serialised through

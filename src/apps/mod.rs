@@ -50,6 +50,11 @@ pub struct AppContext {
     pub services: RuntimeServices,
     /// Per-invocation timeout override (from --timeout flag). 0 = use config default.
     pub timeout_override: Option<u64>,
+    /// Fail instead of prompting for interactive input (from --non-interactive).
+    pub non_interactive: bool,
+    /// Pre-supplied answers for interactive prompts / elicitation, parsed from
+    /// the `--input-json` flag.
+    pub input_json: Option<Value>,
 }
 
 impl AppContext {

@@ -118,6 +118,11 @@ impl CommandKind {
 /// A typed CLI flag derived from JSON Schema or prompt argument metadata.
 #[derive(Debug, Clone)]
 pub struct FlagSpec {
+    /// The original schema property / argument name (e.g. `maxTokens`). The CLI
+    /// flag is the kebab-cased form (`--max-tokens`), but MCP operations must be
+    /// sent with this original name, so we preserve it here rather than trying
+    /// to reverse the lossy kebab-casing later.
+    pub original_name: String,
     pub flag_type: FlagType,
     pub required: bool,
     pub default: Option<Value>,
@@ -403,6 +408,7 @@ fn resource_template_to_command(template: &Value) -> Option<ManifestCommand> {
         flags.insert(
             param.clone(),
             FlagSpec {
+                original_name: param.clone(),
                 flag_type: FlagType::String,
                 required: true,
                 default: None,
@@ -449,6 +455,7 @@ fn prompt_to_command(prompt: &Value) -> Option<ManifestCommand> {
                 flags.insert(
                     to_flag_name(arg_name),
                     FlagSpec {
+                        original_name: arg_name.to_owned(),
                         flag_type: FlagType::String,
                         required: false,
                         default: None,
@@ -468,6 +475,7 @@ fn prompt_to_command(prompt: &Value) -> Option<ManifestCommand> {
                 flags.insert(
                     to_flag_name(arg_name),
                     FlagSpec {
+                        original_name: arg_name.to_owned(),
                         flag_type: FlagType::String,
                         required,
                         default: None,
@@ -526,6 +534,7 @@ fn extract_flags_from_schema(schema: Option<&Value>) -> IndexMap<String, FlagSpe
         flags.insert(
             flag_name,
             FlagSpec {
+                original_name: prop_name.clone(),
                 flag_type,
                 required,
                 default,

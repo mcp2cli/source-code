@@ -74,6 +74,13 @@ pub fn build_dynamic_cli(
                 .help("Fail instead of prompting (CI mode)"),
         )
         .arg(
+            Arg::new("input-json")
+                .long("input-json")
+                .global(true)
+                .value_name("JSON")
+                .help("Provide elicitation answers as a JSON object (CI mode)"),
+        )
+        .arg(
             Arg::new("timeout")
                 .long("timeout")
                 .global(true)
@@ -534,6 +541,10 @@ pub struct DynamicParseResult {
     pub command: DynamicCommand,
     pub output_format: OutputFormat,
     pub timeout: Option<u64>,
+    /// `--non-interactive`: fail instead of prompting (CI mode).
+    pub non_interactive: bool,
+    /// `--input-json`: raw JSON string of pre-supplied elicitation answers.
+    pub input_json: Option<String>,
 }
 
 /// Parse argv against the dynamic CLI, returning a DynamicCommand.
@@ -576,6 +587,8 @@ pub fn parse_dynamic(
         }
     };
     let timeout = matches.get_one::<u64>("timeout").copied();
+    let non_interactive = matches.get_flag("non-interactive");
+    let input_json = matches.get_one::<String>("input-json").cloned();
 
     let (sub_name, sub_matches) = matches
         .subcommand()
@@ -670,6 +683,8 @@ pub fn parse_dynamic(
                 command: DynamicCommand::LegacyBridge,
                 output_format,
                 timeout,
+                non_interactive,
+                input_json,
             });
         }
 
@@ -681,6 +696,8 @@ pub fn parse_dynamic(
         command: cmd,
         output_format,
         timeout,
+        non_interactive,
+        input_json,
     })
 }
 
@@ -809,8 +826,10 @@ fn extract_arguments_from_matches(
         {
             continue;
         }
-        // Map flag value back to original property name
-        let original_name = flag_name_to_property(flag_name);
+        // Send the original schema property name (e.g. `maxTokens`), not the
+        // kebab-cased CLI flag (`max-tokens`), so servers receive the keys they
+        // declared in their input schema.
+        let original_name = spec.original_name.clone();
         match spec.flag_type {
             FlagType::Boolean => {
                 if matches.get_flag(flag_name) {
@@ -878,16 +897,6 @@ fn extract_arguments_from_matches(
     }
 
     Ok(Value::Object(object))
-}
-
-/// Convert a kebab-case flag name back to the original property name.
-/// This is a best-effort reverse of `to_flag_name`.
-fn flag_name_to_property(flag: &str) -> String {
-    // We keep kebab-case as the property name — MCP properties use various
-    // conventions and the server should accept the original property name.
-    // The flag name IS the property name (with - instead of _ or .).
-    // For tools with inputSchema, the original name is preserved in the schema.
-    flag.to_owned()
 }
 
 // ---------------------------------------------------------------------------
@@ -1421,8 +1430,11 @@ async fn execute_jobs_wait(
             &context.config_name,
             "jobs wait",
             format!("job {} has no remote task", job.job_id),
-            vec![format!("status: {}", job.status.as_str())],
-            json!({ "job": job }),
+            vec![
+                format!("status: {}", job.status.as_str()),
+                "waited: false (no remote task to poll)".to_owned(),
+            ],
+            json!({ "job": job, "waited": false }),
         ));
     };
 
@@ -1944,6 +1956,7 @@ mod tests {
                 flags: IndexMap::from([(
                     "message".to_owned(),
                     FlagSpec {
+                        original_name: "message".to_owned(),
                         flag_type: FlagType::String,
                         required: true,
                         default: None,
@@ -2027,5 +2040,73 @@ mod tests {
             &json!({"query": "invoice", "folder": "inbox"}),
         );
         assert_eq!(result, "mail://search?q=invoice&folder=inbox");
+    }
+
+    #[test]
+    fn kebab_flags_map_back_to_original_property_names() {
+        use crate::apps::manifest::*;
+        use indexmap::IndexMap;
+
+        // A tool whose schema uses camelCase + snake_case property names. The
+        // CLI exposes kebab-cased flags, but the MCP arguments object must use
+        // the original names.
+        let cmd = ManifestCommand {
+            kind: CommandKind::Tool,
+            origin_name: "summarize".to_owned(),
+            summary: "Summarize text".to_owned(),
+            flags: IndexMap::from([
+                (
+                    "max-tokens".to_owned(),
+                    FlagSpec {
+                        original_name: "maxTokens".to_owned(),
+                        flag_type: FlagType::Integer,
+                        required: false,
+                        default: None,
+                        help: None,
+                        enum_values: None,
+                    },
+                ),
+                (
+                    "source-text".to_owned(),
+                    FlagSpec {
+                        original_name: "source_text".to_owned(),
+                        flag_type: FlagType::String,
+                        required: true,
+                        default: None,
+                        help: None,
+                        enum_values: None,
+                    },
+                ),
+            ]),
+            positional: None,
+            supports_background: false,
+        };
+        let mut commands = IndexMap::new();
+        commands.insert("summarize".to_owned(), ManifestEntry::Command(cmd.clone()));
+        let manifest = CommandManifest {
+            commands,
+            server_name: Some("Test Server".to_owned()),
+        };
+
+        let app = build_dynamic_cli("work", &manifest, "Test Server");
+        let matches = app
+            .try_get_matches_from(vec![
+                "work",
+                "summarize",
+                "--max-tokens",
+                "5",
+                "--source-text",
+                "hello world",
+            ])
+            .expect("should parse");
+        let (_sub, sub_matches) = matches.subcommand().unwrap();
+        let arguments =
+            extract_arguments_from_matches(sub_matches, &cmd).expect("arguments should extract");
+
+        assert_eq!(arguments["maxTokens"], json!(5));
+        assert_eq!(arguments["source_text"], json!("hello world"));
+        // The kebab-cased flag names must NOT leak into the MCP payload.
+        assert!(arguments.get("max-tokens").is_none());
+        assert!(arguments.get("source-text").is_none());
     }
 }

@@ -26,7 +26,7 @@
 //! every MCP call, so timeouts, events, and telemetry behave
 //! identically to the dynamic path.
 
-use std::{ffi::OsString, path::Path};
+use std::{ffi::OsString, io::IsTerminal, path::Path};
 
 use anyhow::{Result, anyhow};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, error::ErrorKind};
@@ -591,11 +591,14 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
                 command: cmd,
                 output_format: dyn_format,
                 timeout,
+                non_interactive,
+                input_json,
             }) => {
                 let mut context = context.clone();
                 if let Some(t) = timeout {
                     context.timeout_override = Some(t);
                 }
+                apply_ci_flags(&mut context, non_interactive, input_json.as_deref())?;
                 match super::dynamic::execute_dynamic(cmd, dyn_format, &context).await {
                     Ok(report) => return Ok(report),
                     Err(e) if e.to_string() == "__delegate_to_bridge__" => {
@@ -629,8 +632,32 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
     if let Some(timeout) = cli.timeout {
         context.timeout_override = Some(timeout);
     }
+    apply_ci_flags(&mut context, cli.non_interactive, cli.input_json.as_deref())?;
     let domain_command = map_command(&cli.command)?;
     execute_domain_command(domain_command, output_format, context).await
+}
+
+/// Thread the CI-mode flags (`--non-interactive`, `--input-json`) onto the
+/// context and install the process-wide interaction config the elicitation
+/// handler reads. Parses `--input-json` once so an invalid payload fails fast
+/// with a clear message rather than deep inside an operation.
+fn apply_ci_flags(
+    context: &mut AppContext,
+    non_interactive: bool,
+    input_json: Option<&str>,
+) -> Result<()> {
+    context.non_interactive = non_interactive;
+    context.input_json = match input_json {
+        Some(raw) => Some(serde_json::from_str(raw).map_err(|error| {
+            anyhow!("--input-json is not valid JSON: {}", error)
+        })?),
+        None => None,
+    };
+    crate::mcp::handler::set_interaction_config(crate::mcp::handler::InteractionConfig {
+        non_interactive: context.non_interactive,
+        input_json: context.input_json.clone(),
+    });
+    Ok(())
 }
 
 /// Peek at the output format from argv without full parsing.
@@ -1402,25 +1429,11 @@ async fn auth_login(context: &AppContext) -> Result<CommandOutput> {
         return auth_login_demo(context).await;
     }
 
-    // For real servers, prompt for a bearer token on stdin.
-    context
-        .services
-        .event_broker
-        .emit(RuntimeEvent::AuthPrompt {
-            app_id: context.config_name.clone(),
-            message: "enter bearer token for authentication".to_owned(),
-        });
-
-    let token = read_bearer_token_from_stdin()?;
-    if token.is_empty() {
-        return Err(anyhow!(
-            "auth login requires a non-empty bearer token; pipe one via stdin or enter it interactively"
-        ));
-    }
+    let (token, account) = resolve_login_credentials(context)?;
 
     let stored = StoredToken {
         bearer_token: token,
-        account: None,
+        account: account.clone(),
         updated_at: chrono::Utc::now(),
     };
     context
@@ -1432,7 +1445,7 @@ async fn auth_login(context: &AppContext) -> Result<CommandOutput> {
         config_name: context.config_name.clone(),
         app_id: context.config_name.clone(),
         state: AuthSessionState::Authenticated,
-        account: None,
+        account: account.clone(),
         server: Some(context.config.server.display_name.clone()),
         updated_at: stored.updated_at,
     };
@@ -1442,19 +1455,96 @@ async fn auth_login(context: &AppContext) -> Result<CommandOutput> {
         .upsert_auth_session(record)
         .await?;
 
+    let mut lines = vec![
+        "status: authenticated".to_owned(),
+        format!("server: {}", context.config.server.display_name),
+    ];
+    if let Some(account) = &account {
+        lines.push(format!("account: {}", account));
+    }
     Ok(CommandOutput::new(
         &context.config_name,
         "auth login",
         "bearer token stored".to_owned(),
-        vec![
-            "status: authenticated".to_owned(),
-            format!("server: {}", context.config.server.display_name),
-        ],
+        lines,
         json!({
             "status": "authenticated",
             "server": context.config.server.display_name,
+            "account": account,
         }),
     ))
+}
+
+/// Resolve the bearer token (and optional account) for `auth login`, honoring
+/// the CI-mode flags. Resolution order:
+///
+/// 1. `--input-json '{"bearer_token": "...", "account": "..."}'` (account optional).
+/// 2. A bearer token piped on stdin (non-TTY), e.g. `echo "$TOKEN" | … auth login`.
+/// 3. `--non-interactive` with no token available → fail fast (no prompt).
+/// 4. Otherwise prompt interactively on the terminal.
+fn resolve_login_credentials(context: &AppContext) -> Result<(String, Option<String>)> {
+    // 1. Explicit JSON payload.
+    if let Some(input) = &context.input_json {
+        let object = input.as_object().ok_or_else(|| {
+            anyhow!(
+                "--input-json for auth login must be a JSON object like \
+                 {{\"bearer_token\": \"<token>\"}}"
+            )
+        })?;
+        let token = object
+            .get("bearer_token")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                anyhow!(
+                    "--input-json for auth login must contain a non-empty \"bearer_token\" \
+                     string field, e.g. {{\"bearer_token\": \"<token>\"}}"
+                )
+            })?;
+        let account = object
+            .get("account")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        return Ok((token.to_owned(), account));
+    }
+
+    // 2. Piped stdin (non-interactive shells, CI pipelines).
+    if !std::io::stdin().is_terminal() {
+        let token = read_bearer_token_from_stdin()?;
+        if token.is_empty() {
+            return Err(anyhow!(
+                "auth login received empty stdin; pipe a bearer token \
+                 (echo \"$TOKEN\" | … auth login) or pass \
+                 --input-json '{{\"bearer_token\": \"<token>\"}}'"
+            ));
+        }
+        return Ok((token, None));
+    }
+
+    // 3. Non-interactive with nothing to read — fail rather than block.
+    if context.non_interactive {
+        return Err(anyhow!(
+            "--non-interactive set but no bearer token was provided; pass \
+             --input-json '{{\"bearer_token\": \"<token>\"}}' or pipe the token on stdin"
+        ));
+    }
+
+    // 4. Interactive prompt.
+    context
+        .services
+        .event_broker
+        .emit(RuntimeEvent::AuthPrompt {
+            app_id: context.config_name.clone(),
+            message: "enter bearer token for authentication".to_owned(),
+        });
+    let token = read_bearer_token_from_stdin()?;
+    if token.is_empty() {
+        return Err(anyhow!(
+            "auth login requires a non-empty bearer token; pipe one via stdin or enter it interactively"
+        ));
+    }
+    Ok((token, None))
 }
 
 async fn auth_login_demo(context: &AppContext) -> Result<CommandOutput> {

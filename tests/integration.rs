@@ -320,6 +320,55 @@ fn stdio_auth_status_json_output() {
     assert_eq!(parsed["data"]["state"], "authenticated");
 }
 
+#[test]
+fn stdio_auth_login_accepts_input_json() {
+    let fixture = TestFixture::new();
+    let config_path = fixture.write_stdio_config("integ");
+
+    // No stdin is piped — the token comes entirely from --input-json.
+    mcp2cli_with_config(&fixture, "integ", &config_path)
+        .arg("auth")
+        .arg("login")
+        .arg("--input-json")
+        .arg(r#"{"bearer_token": "tok-from-json", "account": "ci@example.com"}"#)
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("authenticated"))
+        .stdout(predicate::str::contains("ci@example.com"));
+
+    // Status should now report authenticated with the supplied account.
+    let output = mcp2cli_with_config(&fixture, "integ", &config_path)
+        .arg("--json")
+        .arg("auth")
+        .arg("status")
+        .timeout(std::time::Duration::from_secs(30))
+        .output()
+        .expect("command should run");
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout))
+            .expect("output should be valid JSON");
+    assert_eq!(parsed["data"]["state"], "authenticated");
+    assert_eq!(parsed["data"]["account"], "ci@example.com");
+}
+
+#[test]
+fn stdio_auth_login_rejects_input_json_without_bearer_token() {
+    let fixture = TestFixture::new();
+    let config_path = fixture.write_stdio_config("integ");
+
+    mcp2cli_with_config(&fixture, "integ", &config_path)
+        .arg("auth")
+        .arg("login")
+        .arg("--input-json")
+        .arg(r#"{"account": "ci@example.com"}"#)
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("bearer_token"));
+}
+
 // ---------------------------------------------------------------------------
 // JSON output for all bridge commands
 // ---------------------------------------------------------------------------

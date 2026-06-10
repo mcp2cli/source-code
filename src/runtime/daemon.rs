@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
 use crate::config::RuntimeLayout;
@@ -123,6 +123,22 @@ pub async fn run_daemon(
         )
     })?;
 
+    // Restrict the socket to the owner — anyone who can connect can drive MCP
+    // operations (including authenticated ones) through this daemon.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |e| {
+                anyhow!(
+                    "failed to restrict daemon socket permissions at {}: {}",
+                    socket_path.display(),
+                    e
+                )
+            },
+        )?;
+    }
+
     // Write PID file
     let info = DaemonInfo {
         pid: std::process::id(),
@@ -188,15 +204,32 @@ async fn handle_daemon_client(
     client: &dyn crate::mcp::client::McpClient,
     event_broker: &crate::runtime::EventBroker,
 ) -> Result<()> {
+    // Cap a single request line so a buggy or runaway client can't drive the
+    // daemon to allocate unbounded memory on a newline-less stream.
+    const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;
+
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
 
     loop {
         line.clear();
-        let bytes = reader.read_line(&mut line).await?;
+        let bytes = (&mut reader)
+            .take(MAX_REQUEST_BYTES)
+            .read_line(&mut line)
+            .await?;
         if bytes == 0 {
             break; // Client disconnected
+        }
+        if bytes as u64 == MAX_REQUEST_BYTES && !line.ends_with('\n') {
+            let err_response = serde_json::json!({
+                "error": format!("request exceeds {} byte limit", MAX_REQUEST_BYTES)
+            });
+            writer
+                .write_all(serde_json::to_string(&err_response)?.as_bytes())
+                .await?;
+            writer.write_all(b"\n").await?;
+            break;
         }
 
         let operation: crate::mcp::model::McpOperation = match serde_json::from_str(line.trim()) {
