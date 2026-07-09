@@ -324,7 +324,7 @@ See [`docs/features/transports.md`](features/transports.md) and [`docs/features/
 ## Known gaps
 
 - **Pagination cursors.** Spec-defined `nextCursor` on `*/list` responses is not yet consumed — mcp2cli issues a single `list` request per primitive and treats the first page as the full inventory. Will matter for servers with very large tool/resource catalogs.
-- **Authorization (OAuth 2.1) flows.** `auth login` supports bearer-token capture and the stored-token lifecycle; end-to-end OAuth authorization-code with PKCE is partial — see [`docs/features/authentication.md`](features/authentication.md) for the current matrix.
+- **Authorization (OAuth 2.1) flows.** `auth login` supports bearer-token capture plus authorization-code + PKCE with dynamic client registration for streamable-HTTP servers. Remaining gaps include client ID metadata documents, pre-registered client config, refresh-token rotation, and runtime step-up authorization — see [`docs/features/authentication.md`](features/authentication.md) for the current matrix.
 - **Multi-root `notifications/roots/list_changed` debouncing.** Clients may spam the server if root config is hot-reloaded in a tight loop; there is no built-in debounce window.
 
 Found a gap not listed here? File an issue — the intent is to track spec coverage accurately.
