@@ -251,6 +251,12 @@ pub struct ServerConfig {
     pub endpoint: Option<String>,
     #[serde(default)]
     pub stdio: StdioServerConfig,
+    /// MCP protocol version selection: `auto` (default; probe with
+    /// `server/discover` and fall back to the `initialize` handshake),
+    /// `2026-07-28` (stateless, never fall back), or `2025-11-25`
+    /// (legacy handshake, skip the probe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_version: Option<String>,
 }
 
 impl ServerConfig {
@@ -258,6 +264,7 @@ impl ServerConfig {
         if self.display_name.trim().is_empty() {
             return Err(anyhow!("server.display_name must not be empty"));
         }
+        crate::mcp::protocol::VersionPolicy::parse(self.protocol_version.as_deref())?;
         match self.transport {
             TransportKind::StreamableHttp
                 if self
@@ -285,6 +292,7 @@ impl Default for ServerConfig {
             transport: default_transport_kind(),
             endpoint: Some("https://demo.invalid/mcp".to_owned()),
             stdio: StdioServerConfig::default(),
+            protocol_version: None,
         }
     }
 }
@@ -491,6 +499,8 @@ pub struct ConfigCreateOptions {
     pub endpoint: Option<String>,
     pub stdio_command: Option<String>,
     pub stdio_args: Vec<String>,
+    /// MCP protocol version selection (`auto`, `2026-07-28`, `2025-11-25`).
+    pub protocol_version: Option<String>,
     pub force: bool,
 }
 
@@ -639,6 +649,11 @@ pub fn write_named_config(
         options.stdio_command.clone(),
         options.stdio_args.clone(),
     );
+    config.server.protocol_version = options
+        .protocol_version
+        .as_deref()
+        .filter(|value| !value.trim().is_empty() && *value != "auto")
+        .map(ToOwned::to_owned);
     config.apply_runtime_defaults(layout, &options.name);
     config.validate()?;
 
@@ -760,6 +775,7 @@ mod tests {
                 app_profile: "bridge".to_owned(),
                 transport: TransportKind::StreamableHttp,
                 endpoint: Some("https://example.com/mcp".to_owned()),
+                protocol_version: None,
                 stdio_command: None,
                 stdio_args: Vec::new(),
                 force: false,
@@ -790,6 +806,7 @@ mod tests {
                 app_profile: "bridge".to_owned(),
                 transport: TransportKind::StreamableHttp,
                 endpoint: Some("https://example.com/mcp".to_owned()),
+                protocol_version: None,
                 stdio_command: None,
                 stdio_args: Vec::new(),
                 force: false,
@@ -826,6 +843,7 @@ mod tests {
                 app_profile: "bridge".to_owned(),
                 transport: TransportKind::Stdio,
                 endpoint: None,
+                protocol_version: None,
                 stdio_command: Some("npx".to_owned()),
                 stdio_args: vec!["@modelcontextprotocol/server-everything".to_owned()],
                 force: false,

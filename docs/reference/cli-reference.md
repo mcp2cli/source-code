@@ -64,6 +64,7 @@ mcp2cli config init --name <NAME> --app bridge \
   [--endpoint <URL>] \
   [--stdio-command <CMD>] \
   [--stdio-arg <ARG>]... \
+  [--protocol-version <auto|2026-07-28|2025-11-25>] \
   [--force]
 ```
 
@@ -75,6 +76,7 @@ mcp2cli config init --name <NAME> --app bridge \
 | `--endpoint <URL>` | for HTTP | Server endpoint URL |
 | `--stdio-command <CMD>` | for stdio | Subprocess command |
 | `--stdio-arg <ARG>` | | Subprocess argument (repeat for each arg) |
+| `--protocol-version <V>` | | MCP revision: `auto` (default), `2026-07-28`, `2025-11-25` |
 | `--force` | | Overwrite an existing config of the same name |
 
 ```bash

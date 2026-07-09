@@ -108,6 +108,9 @@ pub struct NegotiatedCapabilityView {
     pub config_name: String,
     pub app_id: String,
     pub protocol_version: String,
+    /// `legacy` (initialize handshake) or `modern` (stateless 2026-07-28).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_era: Option<String>,
     pub session_id: Option<String>,
     pub server_info: Option<PeerInfo>,
     pub server_capabilities: ServerCapabilities,
@@ -135,6 +138,11 @@ struct PersistedState {
     discovery_inventory: BTreeMap<String, DiscoveryInventoryView>,
     #[serde(default)]
     jobs: Vec<JobRecord>,
+    /// Server log level requested via `log <LEVEL>`, keyed by config name.
+    /// MCP 2026-07-28 removed `logging/setLevel`; the level is injected
+    /// per-request via `_meta[io.modelcontextprotocol/logLevel]` instead.
+    #[serde(default)]
+    server_log_levels: BTreeMap<String, String>,
 }
 
 pub struct StateStore {
@@ -205,6 +213,7 @@ impl StateStore {
             config_name: config_name.to_owned(),
             app_id: app_id.to_owned(),
             protocol_version: session.protocol_version.clone(),
+            protocol_era: Some(session.era.as_str().to_owned()),
             session_id: session.session_id.clone(),
             server_info: session.server_info.clone(),
             server_capabilities,
@@ -217,6 +226,26 @@ impl StateStore {
                 .insert(config_name.to_owned(), record);
             serde_json::to_vec_pretty(&*state)
                 .context("failed to serialize negotiated capability state")?
+        };
+        self.persist_bytes(bytes).await
+    }
+
+    pub async fn server_log_level(&self, config_name: &str) -> Option<String> {
+        self.state
+            .lock()
+            .await
+            .server_log_levels
+            .get(config_name)
+            .cloned()
+    }
+
+    pub async fn set_server_log_level(&self, config_name: &str, level: &str) -> Result<()> {
+        let bytes = {
+            let mut state = self.state.lock().await;
+            state
+                .server_log_levels
+                .insert(config_name.to_owned(), level.to_owned());
+            serde_json::to_vec_pretty(&*state).context("failed to serialize log-level state")?
         };
         self.persist_bytes(bytes).await
     }

@@ -73,11 +73,31 @@ use crate::{
         TransportKind,
     },
     mcp::protocol::{
-        DEFAULT_MCP_PROTOCOL_VERSION, InitializeResult, JsonRpcError, JsonRpcNotification,
-        JsonRpcRequest, JsonRpcResponse, McpClientSession, ProtocolEngine,
+        DEFAULT_MCP_PROTOCOL_VERSION, InitializeResult, JsonRpcError, JsonRpcId,
+        JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, MCP_PROTOCOL_VERSION_LEGACY,
+        META_SUBSCRIPTION_ID, McpClientSession, ModernResultKind, ProbeOutcome, ProtocolEngine,
+        ProtocolEra, VersionPolicy, attach_input_responses, classify_probe_response,
+        is_modern_protocol_error, modern_offline_result, modern_result_kind, parse_input_required,
+        parse_modern_task, select_modern_version,
     },
-    runtime::{EventBroker, RuntimeEvent, TokenStore},
+    runtime::{EventBroker, RuntimeEvent, StateStore, TokenStore},
 };
+
+/// How long the stdio `server/discover` era probe may wait before the
+/// client assumes a legacy (initialize-handshake) server that will never
+/// answer an unknown pre-`initialize` method.
+const STDIO_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// MRTR guard: maximum `input_required` → retry round trips for one
+/// logical operation before giving up.
+const MAX_MRTR_ROUNDS: usize = 8;
+
+/// Tasks-extension polling bounds (`pollIntervalMs` is clamped into
+/// this range; the outer operation timeout still governs the total wait).
+const DEFAULT_TASK_POLL_MS: u64 = 1_000;
+const MIN_TASK_POLL_MS: u64 = 250;
+const MAX_TASK_POLL_MS: u64 = 30_000;
+const MAX_TASK_POLLS: usize = 100_000;
 
 #[async_trait]
 pub trait McpClient: Send + Sync {
@@ -162,24 +182,48 @@ pub async fn build_client(
         )),
         ClientMode::Stdio => {
             let config = config.ok_or_else(|| anyhow!("missing config for stdio MCP client"))?;
+            let policy = VersionPolicy::parse(config.config.server.protocol_version.as_deref())?;
+            let log_level = load_server_log_level(layout, config).await;
             Ok(Box::new(StdioMcpClient::new(
                 config.name.clone(),
                 config.config.server.stdio.clone(),
+                policy,
+                log_level,
             )?))
         }
         ClientMode::StreamableHttp => {
             let config =
                 config.ok_or_else(|| anyhow!("missing config for streamable HTTP MCP client"))?;
             let bearer_token = load_bearer_token(layout, config).await;
+            let policy = VersionPolicy::parse(config.config.server.protocol_version.as_deref())?;
+            let log_level = load_server_log_level(layout, config).await;
             Ok(Box::new(StreamableHttpMcpClient::new(
                 config.name.clone(),
                 config.config.server.endpoint.clone().ok_or_else(|| {
                     anyhow!("server.endpoint must be set for streamable HTTP transport")
                 })?,
                 bearer_token,
+                policy,
+                log_level,
             )?))
         }
     }
+}
+
+/// Read the persisted server log level (set via `log <LEVEL>`) so MCP
+/// 2026-07-28 clients can inject it per-request via
+/// `_meta[io.modelcontextprotocol/logLevel]`. Best effort — a missing or
+/// unreadable state file simply means no log level is requested.
+async fn load_server_log_level(
+    layout: &RuntimeLayout,
+    config: &ResolvedAppConfig,
+) -> Option<String> {
+    let state_path = layout.state_file_path(&config.name);
+    if !state_path.exists() {
+        return None;
+    }
+    let store = StateStore::load(state_path).await.ok()?;
+    store.server_log_level(&config.name).await
 }
 
 /// Read the stored bearer token for a config from the same token-store file the
@@ -288,13 +332,20 @@ pub struct StreamableHttpMcpClient {
 }
 
 impl StdioMcpClient {
-    pub fn new(config_name: String, stdio: StdioServerConfig) -> Result<Self> {
+    pub fn new(
+        config_name: String,
+        stdio: StdioServerConfig,
+        policy: VersionPolicy,
+        log_level: Option<String>,
+    ) -> Result<Self> {
         stdio.validate()?;
         let protocol = ProtocolEngine::new(
             DEFAULT_MCP_PROTOCOL_VERSION,
             "mcp2cli",
             env!("CARGO_PKG_VERSION"),
-        );
+        )
+        .with_policy(policy)
+        .with_log_level(log_level);
         let session = Mutex::new(protocol.initial_session());
 
         Ok(Self {
@@ -499,6 +550,290 @@ impl StdioMcpClient {
             .map_err(|error| anyhow!("failed to flush stdio JSON-RPC notification: {}", error))?;
         Ok(())
     }
+
+    async fn allocate_request_id(&self) -> u64 {
+        let mut next_request_id = self.next_request_id.lock().await;
+        let value = *next_request_id;
+        *next_request_id += 2;
+        value
+    }
+
+    /// Determine the protocol era before the first real operation.
+    ///
+    /// Per the MCP 2026-07-28 stdio backward-compatibility rules the client
+    /// probes with `server/discover`: a `DiscoverResult` (or a recognised
+    /// modern error) marks the server modern; any other error — or silence
+    /// within [`STDIO_PROBE_TIMEOUT`] — marks it legacy, and the legacy
+    /// `initialize` handshake rides along with the first operation as
+    /// before. Pinning `server.protocol_version` skips the probe (legacy)
+    /// or forbids the fallback (modern).
+    async fn ensure_ready(
+        &self,
+        app_id: &str,
+        events: &EventBroker,
+        handler: &OperationMessageHandler,
+    ) -> Result<()> {
+        {
+            let session = self.session.lock().await;
+            if session.initialized {
+                return Ok(());
+            }
+        }
+        let policy = self.protocol.policy();
+        if !policy.probe_first() {
+            return Ok(());
+        }
+
+        let request_id = self.allocate_request_id().await;
+        let probe = self.protocol.probe_request(request_id, None);
+        let outcome = match tokio::time::timeout(
+            STDIO_PROBE_TIMEOUT,
+            self.send_jsonrpc_request(&probe, Some(handler)),
+        )
+        .await
+        {
+            Ok(Ok(response)) => classify_probe_response(&response),
+            Ok(Err(error)) => {
+                if policy.allows_legacy_fallback() {
+                    ProbeOutcome::Legacy {
+                        detail: format!("server/discover probe failed: {}", error),
+                    }
+                } else {
+                    return Err(error);
+                }
+            }
+            Err(_) => ProbeOutcome::Legacy {
+                detail: format!(
+                    "server/discover probe timed out after {}s",
+                    STDIO_PROBE_TIMEOUT.as_secs()
+                ),
+            },
+        };
+
+        match outcome {
+            ProbeOutcome::Modern {
+                negotiated_version,
+                discover,
+            } => {
+                {
+                    let mut session = self.session.lock().await;
+                    self.protocol.complete_discover(
+                        &mut session,
+                        negotiated_version.clone(),
+                        discover,
+                    );
+                }
+                events.emit(RuntimeEvent::Info {
+                    app_id: app_id.to_owned(),
+                    message: format!(
+                        "negotiated MCP {} (stateless) via server/discover",
+                        negotiated_version
+                    ),
+                });
+                Ok(())
+            }
+            ProbeOutcome::ModernUnsupported { supported } => {
+                if let Some(version) = select_modern_version(&supported) {
+                    let request_id = self.allocate_request_id().await;
+                    let probe = self.protocol.probe_request(request_id, Some(&version));
+                    let response = self.send_jsonrpc_request(&probe, Some(handler)).await?;
+                    if let ProbeOutcome::Modern {
+                        negotiated_version,
+                        discover,
+                    } = classify_probe_response(&response)
+                    {
+                        let mut session = self.session.lock().await;
+                        self.protocol
+                            .complete_discover(&mut session, negotiated_version, discover);
+                        return Ok(());
+                    }
+                    return Err(anyhow!(
+                        "server advertised MCP {} but rejected the retried server/discover",
+                        version
+                    ));
+                }
+                if policy.allows_legacy_fallback()
+                    && supported
+                        .iter()
+                        .any(|version| version == MCP_PROTOCOL_VERSION_LEGACY)
+                {
+                    events.emit(RuntimeEvent::Info {
+                        app_id: app_id.to_owned(),
+                        message: format!(
+                            "server offers MCP {} only; using the initialize handshake",
+                            MCP_PROTOCOL_VERSION_LEGACY
+                        ),
+                    });
+                    return Ok(());
+                }
+                Err(anyhow!(
+                    "no mutually supported MCP protocol version (server supports: {})",
+                    supported.join(", ")
+                ))
+            }
+            ProbeOutcome::Legacy { detail } => {
+                if policy.allows_legacy_fallback() {
+                    tracing::debug!(%detail, "treating server as legacy MCP");
+                    events.emit(RuntimeEvent::Info {
+                        app_id: app_id.to_owned(),
+                        message: format!(
+                            "server is not MCP 2026-07-28 ({}); falling back to the {} initialize handshake",
+                            detail, MCP_PROTOCOL_VERSION_LEGACY
+                        ),
+                    });
+                    Ok(())
+                } else {
+                    Err(anyhow!(
+                        "server did not answer server/discover as an MCP 2026-07-28 server ({}); server.protocol_version pins 2026-07-28",
+                        detail
+                    ))
+                }
+            }
+        }
+    }
+
+    /// One-shot modern subscription check: open a `subscriptions/listen`
+    /// stream, wait for `notifications/subscriptions/acknowledged`, then
+    /// cancel the stream (`notifications/cancelled` on stdio). MCP
+    /// 2026-07-28 subscriptions last only while a listener holds the
+    /// stream open, so a one-shot CLI reports the acknowledgment and
+    /// releases the stream.
+    async fn modern_subscribe(
+        &self,
+        uri: &str,
+        session: &McpClientSession,
+        handler: &OperationMessageHandler,
+    ) -> Result<McpOperationResult> {
+        let request_id = self.allocate_request_id().await;
+        let prepared = self.protocol.prepare_operation(
+            session,
+            request_id,
+            &McpOperation::SubscribeResource {
+                uri: uri.to_owned(),
+            },
+        )?;
+        self.ensure_process().await?;
+        let mut process = self.process.lock().await;
+        let process = process
+            .as_mut()
+            .ok_or_else(|| anyhow!("stdio MCP process was not available"))?;
+        let payload = serde_json::to_string(&prepared.request)
+            .map_err(|error| anyhow!("failed to serialize subscriptions/listen: {}", error))?;
+        process
+            .stdin
+            .write_all(format!("{}\n", payload).as_bytes())
+            .await
+            .map_err(|error| anyhow!("failed to write subscriptions/listen: {}", error))?;
+        process
+            .stdin
+            .flush()
+            .await
+            .map_err(|error| anyhow!("failed to flush subscriptions/listen: {}", error))?;
+
+        let expected_id = JsonRpcId::Number(request_id);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let bytes_read = process
+                .stdout
+                .read_line(&mut line)
+                .await
+                .map_err(|error| anyhow!("failed to read listen stream: {}", error))?;
+            if bytes_read == 0 {
+                return Err(anyhow!(
+                    "stdio MCP server ended before acknowledging the subscription"
+                ));
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+                continue;
+            };
+            let has_method = value.get("method").is_some();
+            let has_id = value.get("id").is_some();
+
+            if has_method && !has_id {
+                let method = value["method"].as_str().unwrap_or("");
+                handler.handle_notification(method, value.get("params"));
+                let matches_subscription = value
+                    .get("params")
+                    .and_then(|params| params.get("_meta"))
+                    .and_then(|meta| meta.get(META_SUBSCRIPTION_ID))
+                    .and_then(Value::as_u64)
+                    == Some(request_id);
+                if method == "notifications/subscriptions/acknowledged" && matches_subscription {
+                    let cancel = JsonRpcNotification::new(
+                        "notifications/cancelled",
+                        Some(json!({
+                            "requestId": request_id,
+                            "reason": "one-shot subscribe verification complete",
+                        })),
+                    );
+                    let cancel_payload = serde_json::to_string(&cancel)
+                        .map_err(|error| anyhow!("failed to serialize cancellation: {}", error))?;
+                    process
+                        .stdin
+                        .write_all(format!("{}\n", cancel_payload).as_bytes())
+                        .await
+                        .map_err(|error| anyhow!("failed to write cancellation: {}", error))?;
+                    process
+                        .stdin
+                        .flush()
+                        .await
+                        .map_err(|error| anyhow!("failed to flush cancellation: {}", error))?;
+                    return Ok(McpOperationResult::Subscribed {
+                        message: format!(
+                            "server acknowledged resource subscription for '{}' (MCP 2026-07-28: subscriptions last only while a subscriptions/listen stream stays open; this check released the stream)",
+                            uri
+                        ),
+                        uri: uri.to_owned(),
+                    });
+                }
+                continue;
+            }
+
+            if !has_method
+                && has_id
+                && let Ok(response) = serde_json::from_value::<JsonRpcResponse>(value.clone())
+                && response.id == expected_id
+            {
+                if let Some(error) = response.error {
+                    return Err(anyhow!(
+                        "subscriptions/listen failed: json-rpc error {}: {}",
+                        error.code,
+                        error.message
+                    ));
+                }
+                return Ok(McpOperationResult::Subscribed {
+                    message: format!(
+                        "subscriptions/listen for '{}' was closed gracefully by the server",
+                        uri
+                    ),
+                    uri: uri.to_owned(),
+                });
+            }
+        }
+    }
+}
+
+struct StdioModernSender<'a> {
+    client: &'a StdioMcpClient,
+    handler: &'a OperationMessageHandler,
+}
+
+#[async_trait]
+impl ModernSender for StdioModernSender<'_> {
+    async fn send(&self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
+        self.client
+            .send_jsonrpc_request(request, Some(self.handler))
+            .await
+    }
+
+    async fn allocate_request_id(&self) -> u64 {
+        self.client.allocate_request_id().await
+    }
 }
 
 impl StreamableHttpMcpClient {
@@ -506,6 +841,8 @@ impl StreamableHttpMcpClient {
         config_name: String,
         endpoint: String,
         bearer_token: Option<String>,
+        policy: VersionPolicy,
+        log_level: Option<String>,
     ) -> Result<Self> {
         let endpoint = Url::parse(&endpoint).map_err(|error| {
             anyhow!("invalid streamable HTTP endpoint '{}': {}", endpoint, error)
@@ -536,7 +873,9 @@ impl StreamableHttpMcpClient {
             DEFAULT_MCP_PROTOCOL_VERSION,
             "mcp2cli",
             env!("CARGO_PKG_VERSION"),
-        );
+        )
+        .with_policy(policy)
+        .with_log_level(log_level);
         let session = Mutex::new(protocol.initial_session());
 
         Ok(Self {
@@ -564,7 +903,7 @@ impl StreamableHttpMcpClient {
         let bytes = serde_json::to_vec(request)
             .map_err(|error| anyhow!("failed to serialize JSON-RPC request: {}", error))?;
         let http_response = self
-            .send_http_message(&bytes, session, session.initialized)
+            .send_http_message(&bytes, &WireHeaders::legacy(session, session.initialized))
             .await?;
         let session_id = http_response.session_id.clone();
         let protocol_version = http_response.protocol_version.clone();
@@ -577,6 +916,26 @@ impl StreamableHttpMcpClient {
         })
     }
 
+    /// Send a modern (MCP 2026-07-28) request: no session header, required
+    /// `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` request-metadata
+    /// headers, plus any `Mcp-Param-*` headers mirrored from
+    /// `x-mcp-header`-annotated tool parameters. HTTP 4xx responses that
+    /// carry a JSON-RPC error body surface as JSON-RPC errors so callers
+    /// can react to protocol errors like `UnsupportedProtocolVersionError`.
+    async fn send_modern_jsonrpc(
+        &self,
+        request: &JsonRpcRequest,
+        protocol_version: &str,
+        param_headers: &[(String, String)],
+        handler: Option<&OperationMessageHandler>,
+    ) -> Result<JsonRpcResponse> {
+        let bytes = serde_json::to_vec(request)
+            .map_err(|error| anyhow!("failed to serialize JSON-RPC request: {}", error))?;
+        let headers = WireHeaders::modern(protocol_version, request, param_headers);
+        let raw = self.send_http_message(&bytes, &headers).await?;
+        modern_http_into_jsonrpc(raw, handler)
+    }
+
     async fn send_notification(
         &self,
         notification: &JsonRpcNotification,
@@ -585,7 +944,7 @@ impl StreamableHttpMcpClient {
         let bytes = serde_json::to_vec(notification)
             .map_err(|error| anyhow!("failed to serialize JSON-RPC notification: {}", error))?;
         let response = self
-            .send_http_message(&bytes, session, session.initialized)
+            .send_http_message(&bytes, &WireHeaders::legacy(session, session.initialized))
             .await?;
         if !matches!(
             response.status,
@@ -602,33 +961,9 @@ impl StreamableHttpMcpClient {
     async fn send_http_message(
         &self,
         body: &[u8],
-        session: &McpClientSession,
-        include_protocol_version: bool,
+        wire_headers: &WireHeaders,
     ) -> Result<HttpTransportResponse> {
-        let mut builder = Request::builder()
-            .method(Method::POST)
-            .uri(self.endpoint_uri.clone())
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::ACCEPT, "application/json, text/event-stream");
-
-        if include_protocol_version {
-            builder = builder.header("mcp-protocol-version", session.protocol_version.as_str());
-        }
-        if let Some(session_id) = &session.session_id {
-            builder = builder.header("mcp-session-id", session_id.as_str());
-        }
-        if let Some(token) = &self.bearer_token {
-            builder = builder.header(header::AUTHORIZATION, format!("Bearer {}", token));
-        }
-
-        let request = builder
-            .body(Full::new(Bytes::copy_from_slice(body)))
-            .map_err(|error| anyhow!("failed to build HTTP MCP request: {}", error))?;
-        let response = self
-            .client
-            .request(request)
-            .await
-            .map_err(|error| anyhow!("streamable HTTP request failed: {}", error))?;
+        let response = self.dispatch_http_request(body, wire_headers).await?;
         let status = response.status();
         let headers = response.headers().clone();
         let body = response
@@ -654,6 +989,927 @@ impl StreamableHttpMcpClient {
                 .map(ToOwned::to_owned),
             body,
         })
+    }
+
+    /// Issue the POST and return the raw hyper response (body unread).
+    /// Callers either collect the body ([`Self::send_http_message`]) or
+    /// stream it incrementally (`subscriptions/listen`).
+    async fn dispatch_http_request(
+        &self,
+        body: &[u8],
+        wire_headers: &WireHeaders,
+    ) -> Result<hyper::Response<hyper::body::Incoming>> {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri(self.endpoint_uri.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json, text/event-stream");
+
+        if let Some(version) = &wire_headers.protocol_version {
+            builder = builder.header("mcp-protocol-version", version.as_str());
+        }
+        if let Some(session_id) = &wire_headers.session_id {
+            builder = builder.header("mcp-session-id", session_id.as_str());
+        }
+        if let Some(method) = &wire_headers.mcp_method {
+            builder = builder.header("mcp-method", method.as_str());
+        }
+        if let Some(name) = &wire_headers.mcp_name {
+            builder = builder.header("mcp-name", name.as_str());
+        }
+        for (name, value) in &wire_headers.params {
+            builder = builder.header(format!("mcp-param-{}", name), value.as_str());
+        }
+        if let Some(token) = &self.bearer_token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {}", token));
+        }
+
+        let request = builder
+            .body(Full::new(Bytes::copy_from_slice(body)))
+            .map_err(|error| anyhow!("failed to build HTTP MCP request: {}", error))?;
+        self.client
+            .request(request)
+            .await
+            .map_err(|error| anyhow!("streamable HTTP request failed: {}", error))
+    }
+
+    async fn allocate_request_id(&self) -> u64 {
+        let mut next_request_id = self.next_request_id.lock().await;
+        let value = *next_request_id;
+        *next_request_id += 2;
+        value
+    }
+
+    /// Determine the protocol era before the first real operation.
+    ///
+    /// Per the MCP 2026-07-28 Streamable HTTP backward-compatibility rules
+    /// the client attempts a modern request first (`server/discover`, which
+    /// modern servers MUST implement) and inspects failure bodies: a
+    /// recognised modern JSON-RPC error keeps the client modern; an HTTP
+    /// error without one falls back to the legacy `initialize` handshake.
+    /// Network failures propagate — a dead endpoint is dead in either era.
+    async fn ensure_ready(&self, app_id: &str, events: &EventBroker) -> Result<()> {
+        {
+            let session = self.session.lock().await;
+            if session.initialized {
+                return Ok(());
+            }
+        }
+        let policy = self.protocol.policy();
+        if !policy.probe_first() {
+            return Ok(());
+        }
+
+        let request_id = self.allocate_request_id().await;
+        let probe = self.protocol.probe_request(request_id, None);
+        let outcome = self
+            .send_probe(&probe, crate::mcp::protocol::MCP_PROTOCOL_VERSION_MODERN)
+            .await?;
+
+        match outcome {
+            ProbeOutcome::Modern {
+                negotiated_version,
+                discover,
+            } => {
+                {
+                    let mut session = self.session.lock().await;
+                    self.protocol.complete_discover(
+                        &mut session,
+                        negotiated_version.clone(),
+                        discover,
+                    );
+                }
+                events.emit(RuntimeEvent::Info {
+                    app_id: app_id.to_owned(),
+                    message: format!(
+                        "negotiated MCP {} (stateless) via server/discover",
+                        negotiated_version
+                    ),
+                });
+                Ok(())
+            }
+            ProbeOutcome::ModernUnsupported { supported } => {
+                if let Some(version) = select_modern_version(&supported) {
+                    let request_id = self.allocate_request_id().await;
+                    let probe = self.protocol.probe_request(request_id, Some(&version));
+                    if let ProbeOutcome::Modern {
+                        negotiated_version,
+                        discover,
+                    } = self.send_probe(&probe, &version).await?
+                    {
+                        let mut session = self.session.lock().await;
+                        self.protocol
+                            .complete_discover(&mut session, negotiated_version, discover);
+                        return Ok(());
+                    }
+                    return Err(anyhow!(
+                        "server advertised MCP {} but rejected the retried server/discover",
+                        version
+                    ));
+                }
+                if policy.allows_legacy_fallback()
+                    && supported
+                        .iter()
+                        .any(|version| version == MCP_PROTOCOL_VERSION_LEGACY)
+                {
+                    events.emit(RuntimeEvent::Info {
+                        app_id: app_id.to_owned(),
+                        message: format!(
+                            "server offers MCP {} only; using the initialize handshake",
+                            MCP_PROTOCOL_VERSION_LEGACY
+                        ),
+                    });
+                    return Ok(());
+                }
+                Err(anyhow!(
+                    "no mutually supported MCP protocol version (server supports: {})",
+                    supported.join(", ")
+                ))
+            }
+            ProbeOutcome::Legacy { detail } => {
+                if policy.allows_legacy_fallback() {
+                    tracing::debug!(%detail, "treating server as legacy MCP");
+                    events.emit(RuntimeEvent::Info {
+                        app_id: app_id.to_owned(),
+                        message: format!(
+                            "server is not MCP 2026-07-28 ({}); falling back to the {} initialize handshake",
+                            detail, MCP_PROTOCOL_VERSION_LEGACY
+                        ),
+                    });
+                    Ok(())
+                } else {
+                    Err(anyhow!(
+                        "server did not answer server/discover as an MCP 2026-07-28 server ({}); server.protocol_version pins 2026-07-28",
+                        detail
+                    ))
+                }
+            }
+        }
+    }
+
+    async fn send_probe(&self, probe: &JsonRpcRequest, version: &str) -> Result<ProbeOutcome> {
+        let bytes = serde_json::to_vec(probe)
+            .map_err(|error| anyhow!("failed to serialize server/discover probe: {}", error))?;
+        let headers = WireHeaders::modern(version, probe, &[]);
+        let raw = self.send_http_message(&bytes, &headers).await?;
+
+        if raw.status == StatusCode::OK {
+            let response = raw.into_jsonrpc_response(None)?;
+            return Ok(classify_probe_response(&response));
+        }
+        let status = raw.status;
+        if let Ok(response) = serde_json::from_slice::<JsonRpcResponse>(&raw.body)
+            && let Some(error) = &response.error
+        {
+            if is_modern_protocol_error(error.code) {
+                return Ok(classify_probe_response(&response));
+            }
+            return Ok(ProbeOutcome::Legacy {
+                detail: format!(
+                    "HTTP {} with JSON-RPC error {}: {}",
+                    status, error.code, error.message
+                ),
+            });
+        }
+        Ok(ProbeOutcome::Legacy {
+            detail: format!("HTTP {} without a modern JSON-RPC error body", status),
+        })
+    }
+
+    /// One-shot modern subscription check over Streamable HTTP: POST
+    /// `subscriptions/listen`, read the SSE response stream incrementally
+    /// until `notifications/subscriptions/acknowledged` arrives, then drop
+    /// the stream — closing the response stream is the MCP 2026-07-28
+    /// cancellation signal.
+    async fn modern_subscribe(
+        &self,
+        uri: &str,
+        session: &McpClientSession,
+        handler: &OperationMessageHandler,
+    ) -> Result<McpOperationResult> {
+        let request_id = self.allocate_request_id().await;
+        let prepared = self.protocol.prepare_operation(
+            session,
+            request_id,
+            &McpOperation::SubscribeResource {
+                uri: uri.to_owned(),
+            },
+        )?;
+        let bytes = serde_json::to_vec(&prepared.request)
+            .map_err(|error| anyhow!("failed to serialize subscriptions/listen: {}", error))?;
+        let headers = WireHeaders::modern(&session.protocol_version, &prepared.request, &[]);
+        let response = self.dispatch_http_request(&bytes, &headers).await?;
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned);
+
+        if status != StatusCode::OK
+            || !content_type
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("text/event-stream")
+        {
+            // Collected-body path: an error, or an immediate JSON close.
+            let body = response
+                .into_body()
+                .collect()
+                .await
+                .map_err(|error| anyhow!("failed to read listen response body: {}", error))?
+                .to_bytes();
+            let raw = HttpTransportResponse {
+                status,
+                content_type,
+                session_id: None,
+                protocol_version: None,
+                body,
+            };
+            let jsonrpc = modern_http_into_jsonrpc(raw, Some(handler))?;
+            if let Some(error) = jsonrpc.error {
+                return Err(anyhow!(
+                    "subscriptions/listen failed: json-rpc error {}: {}",
+                    error.code,
+                    error.message
+                ));
+            }
+            return Ok(McpOperationResult::Subscribed {
+                message: format!(
+                    "subscriptions/listen for '{}' was closed gracefully by the server",
+                    uri
+                ),
+                uri: uri.to_owned(),
+            });
+        }
+
+        let mut body = response.into_body();
+        let mut buffer = String::new();
+        loop {
+            let Some(frame) = body.frame().await else {
+                return Err(anyhow!(
+                    "listen stream ended before the server acknowledged the subscription"
+                ));
+            };
+            let frame =
+                frame.map_err(|error| anyhow!("failed to read listen stream: {}", error))?;
+            if let Some(data) = frame.data_ref() {
+                buffer.push_str(&String::from_utf8_lossy(data).replace("\r\n", "\n"));
+            }
+            while let Some(boundary) = buffer.find("\n\n") {
+                let event = buffer[..boundary].to_owned();
+                buffer.replace_range(..boundary + 2, "");
+                let payload = event
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data:"))
+                    .map(str::trim_start)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if payload.is_empty() {
+                    continue;
+                }
+                let Ok(value) = serde_json::from_str::<Value>(&payload) else {
+                    continue;
+                };
+                let has_method = value.get("method").is_some();
+                let has_id = value.get("id").is_some();
+                if has_method && !has_id {
+                    let method = value["method"].as_str().unwrap_or("");
+                    handler.handle_notification(method, value.get("params"));
+                    if method == "notifications/subscriptions/acknowledged" {
+                        // Dropping `body` closes the response stream, which
+                        // the server MUST treat as cancellation.
+                        return Ok(McpOperationResult::Subscribed {
+                            message: format!(
+                                "server acknowledged resource subscription for '{}' (MCP 2026-07-28: subscriptions last only while a subscriptions/listen stream stays open; this check released the stream)",
+                                uri
+                            ),
+                            uri: uri.to_owned(),
+                        });
+                    }
+                    continue;
+                }
+                if !has_method
+                    && has_id
+                    && let Ok(response) = serde_json::from_value::<JsonRpcResponse>(value)
+                {
+                    if let Some(error) = response.error {
+                        return Err(anyhow!(
+                            "subscriptions/listen failed: json-rpc error {}: {}",
+                            error.code,
+                            error.message
+                        ));
+                    }
+                    return Ok(McpOperationResult::Subscribed {
+                        message: format!(
+                            "subscriptions/listen for '{}' was closed gracefully by the server",
+                            uri
+                        ),
+                        uri: uri.to_owned(),
+                    });
+                }
+            }
+        }
+    }
+}
+
+struct HttpModernSender<'a> {
+    client: &'a StreamableHttpMcpClient,
+    handler: &'a OperationMessageHandler,
+    protocol_version: String,
+    param_headers: Vec<(String, String)>,
+}
+
+#[async_trait]
+impl ModernSender for HttpModernSender<'_> {
+    async fn send(&self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
+        self.client
+            .send_modern_jsonrpc(
+                request,
+                &self.protocol_version,
+                &self.param_headers,
+                Some(self.handler),
+            )
+            .await
+    }
+
+    async fn allocate_request_id(&self) -> u64 {
+        self.client.allocate_request_id().await
+    }
+}
+
+/// HTTP headers attached to a Streamable HTTP POST. Legacy requests carry
+/// the session id (and, once negotiated, the protocol version); modern
+/// requests carry the MCP 2026-07-28 request-metadata headers instead.
+#[derive(Debug, Clone, Default)]
+struct WireHeaders {
+    protocol_version: Option<String>,
+    session_id: Option<String>,
+    mcp_method: Option<String>,
+    mcp_name: Option<String>,
+    /// (`x-mcp-header` name, encoded value) pairs → `Mcp-Param-{name}`.
+    params: Vec<(String, String)>,
+}
+
+impl WireHeaders {
+    fn legacy(session: &McpClientSession, include_protocol_version: bool) -> Self {
+        Self {
+            protocol_version: include_protocol_version.then(|| session.protocol_version.clone()),
+            session_id: session.session_id.clone(),
+            ..Self::default()
+        }
+    }
+
+    fn modern(
+        protocol_version: &str,
+        request: &JsonRpcRequest,
+        param_headers: &[(String, String)],
+    ) -> Self {
+        let params = if request.method == "tools/call" {
+            param_headers.to_vec()
+        } else {
+            Vec::new()
+        };
+        Self {
+            protocol_version: Some(protocol_version.to_owned()),
+            session_id: None,
+            mcp_method: Some(request.method.clone()),
+            mcp_name: mcp_name_for_request(request).map(|name| encode_header_value(&name)),
+            params,
+        }
+    }
+}
+
+/// Convert a raw HTTP transport response into a JSON-RPC response under
+/// modern semantics: modern servers return protocol errors (unsupported
+/// version, header mismatch, unknown method) as HTTP 4xx **with** a
+/// JSON-RPC error body, which must reach the caller as a JSON-RPC error
+/// rather than an opaque transport failure.
+fn modern_http_into_jsonrpc(
+    raw: HttpTransportResponse,
+    handler: Option<&OperationMessageHandler>,
+) -> Result<JsonRpcResponse> {
+    if raw.status == StatusCode::OK {
+        return raw.into_jsonrpc_response(handler);
+    }
+    if let Ok(response) = serde_json::from_slice::<JsonRpcResponse>(&raw.body)
+        && response.error.is_some()
+    {
+        return Ok(response);
+    }
+    let body = String::from_utf8_lossy(&raw.body);
+    Err(anyhow!(
+        "unexpected HTTP status {} from streamable MCP endpoint: {}",
+        raw.status,
+        body.trim()
+    ))
+}
+
+/// Source of the `Mcp-Name` header per MCP 2026-07-28: `params.name` for
+/// `tools/call` / `prompts/get`, `params.uri` for `resources/read`.
+fn mcp_name_for_request(request: &JsonRpcRequest) -> Option<String> {
+    let params = request.params.as_ref()?;
+    let field = match request.method.as_str() {
+        "tools/call" | "prompts/get" => "name",
+        "resources/read" => "uri",
+        _ => return None,
+    };
+    params
+        .get(field)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+/// Encode a header value per the MCP 2026-07-28 value-encoding rules:
+/// plain visible-ASCII values pass through; anything else (non-ASCII,
+/// control characters, leading/trailing whitespace, or a literal value
+/// matching the sentinel pattern) is carried as `=?base64?<data>?=`.
+fn encode_header_value(raw: &str) -> String {
+    let plain_safe = !raw.is_empty()
+        && raw
+            .bytes()
+            .all(|byte| (0x21..=0x7E).contains(&byte) || byte == b' ')
+        && !raw.starts_with(' ')
+        && !raw.ends_with(' ')
+        && !(raw.starts_with("=?base64?") && raw.ends_with("?="));
+    if plain_safe {
+        return raw.to_owned();
+    }
+    format!("=?base64?{}?=", base64_standard(raw.as_bytes()))
+}
+
+/// Minimal RFC 4648 standard-alphabet base64 encoder (with padding), kept
+/// local to avoid a dependency for one header-encoding rule.
+fn base64_standard(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        output.push(ALPHABET[(triple >> 18) as usize & 0x3F] as char);
+        output.push(ALPHABET[(triple >> 12) as usize & 0x3F] as char);
+        output.push(if chunk.len() > 1 {
+            ALPHABET[(triple >> 6) as usize & 0x3F] as char
+        } else {
+            '='
+        });
+        output.push(if chunk.len() > 2 {
+            ALPHABET[triple as usize & 0x3F] as char
+        } else {
+            '='
+        });
+    }
+    output
+}
+
+/// An `x-mcp-header` annotation discovered in a tool `inputSchema`
+/// (SEP-2243): `name` becomes the `Mcp-Param-{name}` header, `path` is
+/// the `properties`-only chain to the annotated parameter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HeaderAnnotation {
+    name: String,
+    path: Vec<String>,
+    prop_type: String,
+}
+
+/// Collect and validate every `x-mcp-header` annotation in a tool's
+/// `inputSchema`. Returns an error when any annotation violates the
+/// SEP-2243 constraints — per spec such a tool definition is invalid and
+/// MUST be excluded from `tools/list` by Streamable HTTP clients.
+fn collect_header_annotations(input_schema: &Value) -> Result<Vec<HeaderAnnotation>> {
+    fn walk(schema: &Value, path: &mut Vec<String>, out: &mut Vec<HeaderAnnotation>) -> Result<()> {
+        // Annotations are only valid on chains made purely of `properties`
+        // keys; anything below `items`, composition keywords, `$ref`, or
+        // conditionals is deliberately not traversed, so an annotation
+        // there is simply unreachable — but the spec makes a *present*
+        // annotation on the current node invalid outside a property.
+        let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+            return Ok(());
+        };
+        for (key, prop) in properties {
+            path.push(key.clone());
+            if let Some(header) = prop.get("x-mcp-header") {
+                let name = header
+                    .as_str()
+                    .ok_or_else(|| anyhow!("x-mcp-header on '{}' must be a string", key))?;
+                validate_header_name(name, key)?;
+                let prop_type = prop
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                if !matches!(prop_type.as_str(), "string" | "integer" | "boolean") {
+                    return Err(anyhow!(
+                        "x-mcp-header '{}' on '{}' targets type '{}'; only string, integer and boolean are permitted",
+                        name,
+                        key,
+                        prop_type
+                    ));
+                }
+                out.push(HeaderAnnotation {
+                    name: name.to_owned(),
+                    path: path.clone(),
+                    prop_type,
+                });
+            }
+            walk(prop, path, out)?;
+            path.pop();
+        }
+        Ok(())
+    }
+
+    let mut annotations = Vec::new();
+    walk(input_schema, &mut Vec::new(), &mut annotations)?;
+
+    // Names must be case-insensitively unique within the schema.
+    for (index, annotation) in annotations.iter().enumerate() {
+        if annotations[..index]
+            .iter()
+            .any(|prior| prior.name.eq_ignore_ascii_case(&annotation.name))
+        {
+            return Err(anyhow!(
+                "duplicate x-mcp-header name '{}' (names are case-insensitively unique)",
+                annotation.name
+            ));
+        }
+    }
+    Ok(annotations)
+}
+
+fn validate_header_name(name: &str, property: &str) -> Result<()> {
+    if name.is_empty() {
+        return Err(anyhow!("x-mcp-header on '{}' must not be empty", property));
+    }
+    let is_tchar = |c: char| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c);
+    if !name.chars().all(is_tchar) {
+        return Err(anyhow!(
+            "x-mcp-header '{}' on '{}' is not a valid HTTP field-name token",
+            name,
+            property
+        ));
+    }
+    Ok(())
+}
+
+/// Build `Mcp-Param-*` header pairs for a `tools/call` from the tool's
+/// cached `inputSchema` and the call arguments. Missing or `null` values
+/// omit the header, matching the SEP-2243 client behavior table.
+fn extract_param_headers(
+    input_schema: Option<&Value>,
+    arguments: &Value,
+) -> Result<Vec<(String, String)>> {
+    let Some(schema) = input_schema else {
+        return Ok(Vec::new());
+    };
+    let annotations = collect_header_annotations(schema)?;
+    let mut headers = Vec::new();
+    for annotation in annotations {
+        let mut cursor = arguments;
+        let mut present = true;
+        for key in &annotation.path {
+            match cursor.get(key) {
+                Some(next) => cursor = next,
+                None => {
+                    present = false;
+                    break;
+                }
+            }
+        }
+        if !present || cursor.is_null() {
+            continue;
+        }
+        let rendered = match annotation.prop_type.as_str() {
+            "string" => cursor.as_str().map(ToOwned::to_owned),
+            "integer" => cursor.as_i64().and_then(|value| {
+                // JavaScript safe-integer bound required by the spec.
+                (value.abs() <= 9_007_199_254_740_991).then(|| value.to_string())
+            }),
+            "boolean" => cursor.as_bool().map(|value| value.to_string()),
+            _ => None,
+        };
+        if let Some(rendered) = rendered {
+            headers.push((annotation.name.clone(), encode_header_value(&rendered)));
+        }
+    }
+    Ok(headers)
+}
+
+/// Drop tools whose `x-mcp-header` annotations are invalid from a
+/// discovery result, as MCP 2026-07-28 requires of Streamable HTTP
+/// clients, logging a warning for each rejected tool.
+fn reject_invalid_header_tools(items: &mut Vec<Value>, events: &EventBroker, app_id: &str) {
+    items.retain(|item| {
+        if item.get("kind").and_then(Value::as_str) != Some("tool") {
+            return true;
+        }
+        let Some(schema) = item.get("inputSchema") else {
+            return true;
+        };
+        match collect_header_annotations(schema) {
+            Ok(_) => true,
+            Err(error) => {
+                let tool = item
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("(unknown)");
+                tracing::warn!(tool, %error, "rejecting tool with invalid x-mcp-header annotation");
+                events.emit(RuntimeEvent::Info {
+                    app_id: app_id.to_owned(),
+                    message: format!(
+                        "rejected tool '{}' from discovery: invalid x-mcp-header annotation ({})",
+                        tool, error
+                    ),
+                });
+                false
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// MCP 2026-07-28 operation driver (shared by stdio and streamable HTTP)
+// ---------------------------------------------------------------------------
+
+/// Transport adapter used by [`drive_modern_operation`]: sends one modern
+/// JSON-RPC request and allocates request IDs from the client's counter.
+#[async_trait]
+trait ModernSender: Send + Sync {
+    async fn send(&self, request: &JsonRpcRequest) -> Result<JsonRpcResponse>;
+    async fn allocate_request_id(&self) -> u64;
+}
+
+/// Execute one modern operation end-to-end: send the prepared request,
+/// resolve MRTR `input_required` interim results by fulfilling the
+/// embedded input requests and retrying with a fresh request ID, and
+/// resolve tasks-extension `task` results by polling `tasks/get`
+/// (answering `input_required` task states via `tasks/update`).
+async fn drive_modern_operation(
+    protocol: &ProtocolEngine,
+    session: &McpClientSession,
+    operation: &McpOperation,
+    mut request: JsonRpcRequest,
+    sender: &dyn ModernSender,
+    handler: &OperationMessageHandler,
+) -> Result<McpOperationResult> {
+    let mut response = sender.send(&request).await?;
+    let mut mrtr_rounds = 0usize;
+    loop {
+        if response.error.is_some() {
+            return decode_modern_response(protocol, session, operation, sender, handler, response)
+                .await;
+        }
+        let result = response.result.clone().unwrap_or_else(|| json!({}));
+        match modern_result_kind(&result) {
+            ModernResultKind::Complete => {
+                return decode_modern_response(
+                    protocol, session, operation, sender, handler, response,
+                )
+                .await;
+            }
+            ModernResultKind::InputRequired => {
+                mrtr_rounds += 1;
+                if mrtr_rounds > MAX_MRTR_ROUNDS {
+                    return Err(anyhow!(
+                        "server kept requesting additional input after {} round trips",
+                        MAX_MRTR_ROUNDS
+                    ));
+                }
+                let interim = parse_input_required(&result)?;
+                let input_responses = handler.fulfill_input_requests(&interim.input_requests)?;
+                let new_id = sender.allocate_request_id().await;
+                attach_input_responses(
+                    &mut request,
+                    new_id,
+                    input_responses,
+                    interim.request_state.as_deref(),
+                );
+                response = sender.send(&request).await?;
+            }
+            ModernResultKind::Task => {
+                let task = crate::mcp::protocol::parse_modern_task(&result)?;
+                if let McpOperation::InvokeAction {
+                    capability,
+                    arguments,
+                    background: true,
+                    ..
+                } = operation
+                {
+                    return Ok(McpOperationResult::TaskAccepted {
+                        message: format!(
+                            "{} accepted as background task ({})",
+                            capability, task.task_id
+                        ),
+                        remote_task_id: Some(task.task_id.clone()),
+                        detail: json!({
+                            "capability": capability,
+                            "arguments": arguments,
+                            "task": task.raw,
+                        }),
+                    });
+                }
+                let final_task = poll_modern_task(protocol, session, task, sender, handler).await?;
+                return finish_modern_task(operation, final_task);
+            }
+        }
+    }
+}
+
+/// Poll a tasks-extension task to a terminal state, answering
+/// `input_required` states via `tasks/update` and honouring the server's
+/// suggested `pollIntervalMs` (clamped to sane bounds).
+async fn poll_modern_task(
+    protocol: &ProtocolEngine,
+    session: &McpClientSession,
+    mut task: crate::mcp::protocol::ModernTask,
+    sender: &dyn ModernSender,
+    handler: &OperationMessageHandler,
+) -> Result<crate::mcp::protocol::ModernTask> {
+    let mut polls = 0usize;
+    loop {
+        if task.is_terminal() {
+            return Ok(task);
+        }
+        if task.status == "input_required" && !task.input_requests.is_empty() {
+            let input_responses = handler.fulfill_input_requests(&task.input_requests)?;
+            let id = sender.allocate_request_id().await;
+            let mut update = JsonRpcRequest::new(
+                JsonRpcId::Number(id),
+                "tasks/update",
+                Some(json!({
+                    "taskId": task.task_id,
+                    "inputResponses": input_responses,
+                })),
+            );
+            protocol.inject_modern_meta(&mut update, session);
+            let response = sender.send(&update).await?;
+            if let Some(error) = response.error {
+                return Err(anyhow!(
+                    "tasks/update for '{}' failed: {}",
+                    task.task_id,
+                    error.message
+                ));
+            }
+        } else {
+            let interval = task
+                .poll_interval_ms
+                .unwrap_or(DEFAULT_TASK_POLL_MS)
+                .clamp(MIN_TASK_POLL_MS, MAX_TASK_POLL_MS);
+            sleep(Duration::from_millis(interval)).await;
+        }
+
+        polls += 1;
+        if polls > MAX_TASK_POLLS {
+            return Err(anyhow!(
+                "task '{}' did not reach a terminal state after {} polls",
+                task.task_id,
+                MAX_TASK_POLLS
+            ));
+        }
+        let id = sender.allocate_request_id().await;
+        let mut get = JsonRpcRequest::new(
+            JsonRpcId::Number(id),
+            "tasks/get",
+            Some(json!({ "taskId": task.task_id })),
+        );
+        protocol.inject_modern_meta(&mut get, session);
+        let response = sender.send(&get).await?;
+        if let Some(error) = response.error {
+            return Err(anyhow!(
+                "tasks/get for '{}' failed: {}",
+                task.task_id,
+                error.message
+            ));
+        }
+        let result = response
+            .result
+            .ok_or_else(|| anyhow!("tasks/get did not return a result"))?;
+        task = crate::mcp::protocol::parse_modern_task(&result)?;
+    }
+}
+
+/// Turn a terminal tasks-extension task into the operation's result: a
+/// completed task's `result` field carries exactly what the original
+/// request would have returned synchronously.
+fn finish_modern_task(
+    operation: &McpOperation,
+    task: crate::mcp::protocol::ModernTask,
+) -> Result<McpOperationResult> {
+    match task.status.as_str() {
+        "completed" => {
+            let inner = task.result.clone().unwrap_or_else(|| json!({}));
+            let synthetic = JsonRpcResponse {
+                jsonrpc: "2.0".to_owned(),
+                id: JsonRpcId::String(format!("task-{}", task.task_id)),
+                result: Some(inner),
+                error: None,
+            };
+            map_streamable_http_response(operation, synthetic)
+        }
+        "failed" => {
+            let detail = task
+                .error
+                .as_ref()
+                .and_then(|error| error.get("message").and_then(Value::as_str))
+                .or(task.status_message.as_deref())
+                .unwrap_or("task failed");
+            Err(anyhow!("task '{}' failed: {}", task.task_id, detail))
+        }
+        other => Err(anyhow!("task '{}' ended as '{}'", task.task_id, other)),
+    }
+}
+
+/// Decode a modern complete/error response into an operation result.
+/// Most operations share the legacy decoders (extra fields such as
+/// `resultType`, `ttlMs` and `cacheScope` are ignored); the exceptions
+/// are the era-specific method mappings.
+async fn decode_modern_response(
+    protocol: &ProtocolEngine,
+    session: &McpClientSession,
+    operation: &McpOperation,
+    sender: &dyn ModernSender,
+    handler: &OperationMessageHandler,
+    response: JsonRpcResponse,
+) -> Result<McpOperationResult> {
+    if let Some(error) = &response.error {
+        let hint = if error.code == crate::mcp::protocol::ERROR_UNSUPPORTED_PROTOCOL_VERSION {
+            let supported = error
+                .data
+                .as_ref()
+                .and_then(|data| data.get("supported"))
+                .map(|value| format!("; server supports {}", value))
+                .unwrap_or_default();
+            format!(" (unsupported protocol version{})", supported)
+        } else {
+            String::new()
+        };
+        return Err(anyhow!(
+            "json-rpc error {}: {}{}",
+            error.code,
+            error.message,
+            hint
+        ));
+    }
+
+    match operation {
+        // Modern liveness: `ping` was removed, `server/discover` answered.
+        McpOperation::Ping => {
+            let server = response
+                .result
+                .as_ref()
+                .and_then(|result| result.get("serverInfo"))
+                .and_then(|info| info.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or("server");
+            Ok(McpOperationResult::Pong {
+                message: format!("{} is alive (answered server/discover)", server),
+            })
+        }
+        McpOperation::TaskGet { task_id } | McpOperation::TaskResult { task_id } => {
+            let result = response
+                .result
+                .ok_or_else(|| anyhow!("tasks/get did not return a result"))?;
+            let mut task = parse_modern_task(&result)?;
+            // Fulfil pending input requests so `jobs show/wait` keep a
+            // paused task moving, then re-read the state once.
+            if task.status == "input_required" && !task.input_requests.is_empty() {
+                let input_responses = handler.fulfill_input_requests(&task.input_requests)?;
+                let id = sender.allocate_request_id().await;
+                let mut update = JsonRpcRequest::new(
+                    JsonRpcId::Number(id),
+                    "tasks/update",
+                    Some(json!({ "taskId": task.task_id, "inputResponses": input_responses })),
+                );
+                protocol.inject_modern_meta(&mut update, session);
+                sender.send(&update).await?;
+                let id = sender.allocate_request_id().await;
+                let mut get = JsonRpcRequest::new(
+                    JsonRpcId::Number(id),
+                    "tasks/get",
+                    Some(json!({ "taskId": task.task_id })),
+                );
+                protocol.inject_modern_meta(&mut get, session);
+                let refreshed = sender.send(&get).await?;
+                if let Some(result) = refreshed.result {
+                    task = parse_modern_task(&result)?;
+                }
+            }
+            let failure_reason = task
+                .error
+                .as_ref()
+                .and_then(|error| error.get("message").and_then(Value::as_str))
+                .map(ToOwned::to_owned);
+            Ok(McpOperationResult::Task {
+                status: parse_task_state(&task.status),
+                message: format!("task {} is {}", task_id, task.status),
+                remote_task_id: task.task_id.clone(),
+                data: task.raw.clone(),
+                result: task.result.clone(),
+                failure_reason,
+            })
+        }
+        _ => map_streamable_http_response(operation, response),
     }
 }
 
@@ -786,6 +2042,7 @@ impl McpClient for DemoMcpClient {
                 capability,
                 arguments,
                 background,
+                ..
             } => {
                 events.emit(RuntimeEvent::Progress {
                     app_id: app_id.to_owned(),
@@ -1110,12 +2367,48 @@ impl McpClient for StdioMcpClient {
         events: &EventBroker,
         inventory_stale_path: Option<&PathBuf>,
     ) -> Result<McpOperationResult> {
-        let request_id = {
-            let mut next_request_id = self.next_request_id.lock().await;
-            let value = *next_request_id;
-            *next_request_id += 2;
-            value
+        let handler = OperationMessageHandler {
+            app_id: app_id.to_owned(),
+            events: events.clone(),
+            inventory_stale_path: inventory_stale_path.cloned(),
+            roots: Vec::new(),
         };
+
+        self.ensure_ready(app_id, events, &handler).await?;
+        let session_snapshot = {
+            let session = self.session.lock().await;
+            session.clone()
+        };
+
+        if session_snapshot.era == ProtocolEra::Modern {
+            if let Some(result) = modern_offline_result(&operation) {
+                return Ok(result);
+            }
+            if let McpOperation::SubscribeResource { uri } = &operation {
+                return self
+                    .modern_subscribe(uri, &session_snapshot, &handler)
+                    .await;
+            }
+            let request_id = self.allocate_request_id().await;
+            let prepared =
+                self.protocol
+                    .prepare_operation(&session_snapshot, request_id, &operation)?;
+            let sender = StdioModernSender {
+                client: self,
+                handler: &handler,
+            };
+            return drive_modern_operation(
+                &self.protocol,
+                &session_snapshot,
+                &operation,
+                prepared.request,
+                &sender,
+                &handler,
+            )
+            .await;
+        }
+
+        let request_id = self.allocate_request_id().await;
         let prepared = {
             let session = self.session.lock().await;
             self.protocol
@@ -1129,13 +2422,6 @@ impl McpClient for StdioMcpClient {
                 prepared.outbound_message_count(),
             ),
         });
-
-        let handler = OperationMessageHandler {
-            app_id: app_id.to_owned(),
-            events: events.clone(),
-            inventory_stale_path: inventory_stale_path.cloned(),
-            roots: Vec::new(),
-        };
 
         if let Some(initialize) = &prepared.initialize {
             let initialize_response = self.send_jsonrpc_request(initialize, None).await?;
@@ -1204,12 +2490,72 @@ impl McpClient for StreamableHttpMcpClient {
         events: &EventBroker,
         inventory_stale_path: Option<&PathBuf>,
     ) -> Result<McpOperationResult> {
-        let request_id = {
-            let mut next_request_id = self.next_request_id.lock().await;
-            let value = *next_request_id;
-            *next_request_id += 2;
-            value
+        let handler = OperationMessageHandler {
+            app_id: app_id.to_owned(),
+            events: events.clone(),
+            inventory_stale_path: inventory_stale_path.cloned(),
+            roots: Vec::new(),
         };
+
+        self.ensure_ready(app_id, events).await?;
+        let modern_session = {
+            let session = self.session.lock().await;
+            (session.era == ProtocolEra::Modern).then(|| session.clone())
+        };
+
+        if let Some(session_snapshot) = modern_session {
+            if let Some(result) = modern_offline_result(&operation) {
+                return Ok(result);
+            }
+            if let McpOperation::SubscribeResource { uri } = &operation {
+                return self
+                    .modern_subscribe(uri, &session_snapshot, &handler)
+                    .await;
+            }
+            let param_headers = if let McpOperation::InvokeAction {
+                arguments,
+                input_schema,
+                ..
+            } = &operation
+            {
+                extract_param_headers(input_schema.as_ref(), arguments)?
+            } else {
+                Vec::new()
+            };
+            let request_id = self.allocate_request_id().await;
+            let prepared =
+                self.protocol
+                    .prepare_operation(&session_snapshot, request_id, &operation)?;
+            let sender = HttpModernSender {
+                client: self,
+                handler: &handler,
+                protocol_version: session_snapshot.protocol_version.clone(),
+                param_headers,
+            };
+            let mut result = drive_modern_operation(
+                &self.protocol,
+                &session_snapshot,
+                &operation,
+                prepared.request,
+                &sender,
+                &handler,
+            )
+            .await?;
+            // MCP 2026-07-28 requires Streamable HTTP clients to exclude
+            // tools whose x-mcp-header annotations are invalid.
+            if matches!(
+                &operation,
+                McpOperation::Discover {
+                    category: DiscoveryCategory::Capabilities
+                }
+            ) && let McpOperationResult::Discovery { items, .. } = &mut result
+            {
+                reject_invalid_header_tools(items, events, app_id);
+            }
+            return Ok(result);
+        }
+
+        let request_id = self.allocate_request_id().await;
         let prepared = {
             let session = self.session.lock().await;
             self.protocol
@@ -1224,13 +2570,6 @@ impl McpClient for StreamableHttpMcpClient {
                 prepared.outbound_message_count(),
             ),
         });
-
-        let handler = OperationMessageHandler {
-            app_id: app_id.to_owned(),
-            events: events.clone(),
-            inventory_stale_path: inventory_stale_path.cloned(),
-            roots: Vec::new(),
-        };
 
         if let Some(initialize) = &prepared.initialize {
             let session_snapshot = {
@@ -1303,6 +2642,7 @@ fn map_streamable_http_response(
             capability,
             arguments,
             background,
+            ..
         } => map_tool_call_response(capability, arguments, *background, response),
         McpOperation::ReadResource { uri } => map_resource_read_response(uri, response),
         McpOperation::RunPrompt { name, arguments } => {
@@ -1918,6 +3258,7 @@ fn parse_task_state(status: &str) -> crate::mcp::model::TaskState {
     match status {
         "queued" => crate::mcp::model::TaskState::Queued,
         "running" | "working" => crate::mcp::model::TaskState::Running,
+        "input_required" => crate::mcp::model::TaskState::InputRequired,
         "completed" => crate::mcp::model::TaskState::Completed,
         "canceled" | "cancelled" => crate::mcp::model::TaskState::Canceled,
         "failed" => crate::mcp::model::TaskState::Failed,
@@ -2015,6 +3356,7 @@ mod tests {
                     transport: TransportKind::StreamableHttp,
                     endpoint: Some(endpoint.to_owned()),
                     stdio: StdioServerConfig::default(),
+                    protocol_version: None,
                 },
                 defaults: DefaultsConfig::default(),
                 logging: LoggingConfig::default(),
@@ -2077,8 +3419,14 @@ mod tests {
 
     #[test]
     fn streamable_http_client_rejects_invalid_endpoint() {
-        let error = StreamableHttpMcpClient::new("work".to_owned(), "not a url".to_owned(), None)
-            .expect_err("invalid endpoint should fail");
+        let error = StreamableHttpMcpClient::new(
+            "work".to_owned(),
+            "not a url".to_owned(),
+            None,
+            VersionPolicy::Auto,
+            None,
+        )
+        .expect_err("invalid endpoint should fail");
         assert!(
             error
                 .to_string()
@@ -2092,6 +3440,8 @@ mod tests {
             "work".to_owned(),
             "https://example.com/mcp".to_owned(),
             Some("tok-abc".to_owned()),
+            VersionPolicy::Auto,
+            None,
         )
         .expect("https endpoints should build");
     }
@@ -2101,6 +3451,8 @@ mod tests {
         let error = StreamableHttpMcpClient::new(
             "work".to_owned(),
             "ftp://example.com/mcp".to_owned(),
+            None,
+            VersionPolicy::Auto,
             None,
         )
         .expect_err("non http(s) scheme should fail");
@@ -2112,8 +3464,13 @@ mod tests {
 
     #[test]
     fn stdio_client_rejects_missing_command() {
-        let error = StdioMcpClient::new("work".to_owned(), StdioServerConfig::default())
-            .expect_err("missing stdio command should fail");
+        let error = StdioMcpClient::new(
+            "work".to_owned(),
+            StdioServerConfig::default(),
+            VersionPolicy::Auto,
+            None,
+        )
+        .expect_err("missing stdio command should fail");
         assert!(
             error
                 .to_string()
@@ -2164,11 +3521,13 @@ mod tests {
             "work".to_owned(),
             format!("http://{addr}/mcp"),
             Some("tok-abc".to_owned()),
+            VersionPolicy::Auto,
+            None,
         )
         .expect("client should build");
         let session = client.session.lock().await.clone();
         client
-            .send_http_message(b"{}", &session, false)
+            .send_http_message(b"{}", &WireHeaders::legacy(&session, false))
             .await
             .expect("request should round-trip");
 
@@ -2188,12 +3547,17 @@ mod tests {
         let addr = listener.local_addr().expect("local addr");
         let server = tokio::spawn(capture_one_http_request(listener));
 
-        let client =
-            StreamableHttpMcpClient::new("work".to_owned(), format!("http://{addr}/mcp"), None)
-                .expect("client should build");
+        let client = StreamableHttpMcpClient::new(
+            "work".to_owned(),
+            format!("http://{addr}/mcp"),
+            None,
+            VersionPolicy::Auto,
+            None,
+        )
+        .expect("client should build");
         let session = client.session.lock().await.clone();
         client
-            .send_http_message(b"{}", &session, false)
+            .send_http_message(b"{}", &WireHeaders::legacy(&session, false))
             .await
             .expect("request should round-trip");
 
@@ -2209,6 +3573,8 @@ mod tests {
         let client = StreamableHttpMcpClient::new(
             "work".to_owned(),
             "http://example.com/mcp".to_owned(),
+            None,
+            VersionPolicy::Auto,
             None,
         )
         .expect("client should build");
@@ -2381,6 +3747,278 @@ mod tests {
         assert_eq!(
             coerce_elicitation_value("Guitar, Piano", "array", &prop),
             json!(["Guitar", "Piano"])
+        );
+    }
+
+    // -- MCP 2026-07-28 transport helpers ------------------------------------
+
+    #[test]
+    fn header_values_pass_plain_ascii_and_base64_encode_the_rest() {
+        assert_eq!(encode_header_value("us-west1"), "us-west1");
+        assert_eq!(encode_header_value("get_weather"), "get_weather");
+        // Non-ASCII → base64 sentinel (example from the spec).
+        assert_eq!(
+            encode_header_value("Hello, 世界"),
+            "=?base64?SGVsbG8sIOS4lueVjA==?="
+        );
+        // Leading/trailing whitespace → encoded.
+        assert_eq!(encode_header_value(" padded "), "=?base64?IHBhZGRlZCA=?=");
+        // Embedded newline → encoded.
+        assert_eq!(
+            encode_header_value("line1\nline2"),
+            "=?base64?bGluZTEKbGluZTI=?="
+        );
+        // A literal sentinel-shaped value must itself be encoded.
+        assert_eq!(
+            encode_header_value("=?base64?literal?="),
+            "=?base64?PT9iYXNlNjQ/bGl0ZXJhbD89?="
+        );
+    }
+
+    #[test]
+    fn mcp_name_is_derived_from_method_specific_fields() {
+        let tool = JsonRpcRequest::new(
+            crate::mcp::protocol::JsonRpcId::Number(1),
+            "tools/call",
+            Some(json!({ "name": "get_weather" })),
+        );
+        assert_eq!(mcp_name_for_request(&tool).as_deref(), Some("get_weather"));
+
+        let read = JsonRpcRequest::new(
+            crate::mcp::protocol::JsonRpcId::Number(2),
+            "resources/read",
+            Some(json!({ "uri": "file:///config.json" })),
+        );
+        assert_eq!(
+            mcp_name_for_request(&read).as_deref(),
+            Some("file:///config.json")
+        );
+
+        let list = JsonRpcRequest::new(
+            crate::mcp::protocol::JsonRpcId::Number(3),
+            "tools/list",
+            None,
+        );
+        assert_eq!(mcp_name_for_request(&list), None);
+    }
+
+    #[test]
+    fn param_headers_extract_annotated_primitives() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "region": { "type": "string", "x-mcp-header": "Region" },
+                "attempts": { "type": "integer", "x-mcp-header": "Attempts" },
+                "dry_run": { "type": "boolean", "x-mcp-header": "Dry-Run" },
+                "query": { "type": "string" },
+                "nested": {
+                    "type": "object",
+                    "properties": {
+                        "tenant": { "type": "string", "x-mcp-header": "Tenant" }
+                    }
+                }
+            }
+        });
+        let arguments = json!({
+            "region": "us-west1",
+            "attempts": 3,
+            "dry_run": true,
+            "query": "SELECT 1",
+            "nested": { "tenant": "acme" }
+        });
+
+        let mut headers =
+            extract_param_headers(Some(&schema), &arguments).expect("annotations should be valid");
+        headers.sort();
+        assert_eq!(
+            headers,
+            vec![
+                ("Attempts".to_owned(), "3".to_owned()),
+                ("Dry-Run".to_owned(), "true".to_owned()),
+                ("Region".to_owned(), "us-west1".to_owned()),
+                ("Tenant".to_owned(), "acme".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn param_headers_omit_missing_and_null_values() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "region": { "type": "string", "x-mcp-header": "Region" },
+                "zone": { "type": "string", "x-mcp-header": "Zone" }
+            }
+        });
+        let headers =
+            extract_param_headers(Some(&schema), &json!({ "zone": null })).expect("valid");
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn param_headers_reject_invalid_annotations() {
+        // number type is explicitly forbidden
+        let number = json!({
+            "type": "object",
+            "properties": { "rate": { "type": "number", "x-mcp-header": "Rate" } }
+        });
+        assert!(extract_param_headers(Some(&number), &json!({})).is_err());
+
+        // duplicate names differing only by case
+        let duplicate = json!({
+            "type": "object",
+            "properties": {
+                "a": { "type": "string", "x-mcp-header": "Region" },
+                "b": { "type": "string", "x-mcp-header": "region" }
+            }
+        });
+        assert!(extract_param_headers(Some(&duplicate), &json!({})).is_err());
+
+        // non-tchar characters in the header name
+        let bad_name = json!({
+            "type": "object",
+            "properties": { "a": { "type": "string", "x-mcp-header": "Bad Name" } }
+        });
+        assert!(extract_param_headers(Some(&bad_name), &json!({})).is_err());
+    }
+
+    #[test]
+    fn invalid_header_tools_are_rejected_from_discovery() {
+        let mut items = vec![
+            json!({
+                "id": "good",
+                "kind": "tool",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": { "region": { "type": "string", "x-mcp-header": "Region" } }
+                }
+            }),
+            json!({
+                "id": "bad",
+                "kind": "tool",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": { "rate": { "type": "number", "x-mcp-header": "Rate" } }
+                }
+            }),
+        ];
+        reject_invalid_header_tools(&mut items, &EventBroker::default(), "test");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], json!("good"));
+    }
+
+    #[test]
+    fn modern_wire_headers_carry_request_metadata_without_session() {
+        let request = JsonRpcRequest::new(
+            crate::mcp::protocol::JsonRpcId::Number(1),
+            "tools/call",
+            Some(json!({ "name": "send" })),
+        );
+        let headers = WireHeaders::modern(
+            "2026-07-28",
+            &request,
+            &[("Region".to_owned(), "us-west1".to_owned())],
+        );
+        assert_eq!(headers.protocol_version.as_deref(), Some("2026-07-28"));
+        assert_eq!(headers.mcp_method.as_deref(), Some("tools/call"));
+        assert_eq!(headers.mcp_name.as_deref(), Some("send"));
+        assert!(headers.session_id.is_none());
+        assert_eq!(headers.params.len(), 1);
+
+        // Mcp-Param-* headers only apply to tools/call requests.
+        let get = JsonRpcRequest::new(
+            crate::mcp::protocol::JsonRpcId::Number(2),
+            "tasks/get",
+            Some(json!({ "taskId": "t1" })),
+        );
+        let headers = WireHeaders::modern(
+            "2026-07-28",
+            &get,
+            &[("Region".to_owned(), "us-west1".to_owned())],
+        );
+        assert!(headers.params.is_empty());
+    }
+
+    #[test]
+    fn modern_http_surfaces_jsonrpc_error_bodies_on_4xx() {
+        let raw = HttpTransportResponse {
+            status: StatusCode::BAD_REQUEST,
+            content_type: Some("application/json".to_owned()),
+            session_id: None,
+            protocol_version: None,
+            body: Bytes::from(
+                serde_json::to_vec(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": {
+                        "code": -32022,
+                        "message": "Unsupported protocol version",
+                        "data": { "supported": ["2026-07-28"] }
+                    }
+                }))
+                .unwrap(),
+            ),
+        };
+        let response = modern_http_into_jsonrpc(raw, None).expect("error body should decode");
+        assert_eq!(
+            response.error.as_ref().map(|error| error.code),
+            Some(-32022)
+        );
+
+        let opaque = HttpTransportResponse {
+            status: StatusCode::BAD_REQUEST,
+            content_type: Some("text/plain".to_owned()),
+            session_id: None,
+            protocol_version: None,
+            body: Bytes::from_static(b"Bad Request: no session"),
+        };
+        assert!(modern_http_into_jsonrpc(opaque, None).is_err());
+    }
+
+    #[tokio::test]
+    async fn modern_http_request_sends_required_metadata_headers() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(capture_one_http_request(listener));
+
+        let client = StreamableHttpMcpClient::new(
+            "email".to_owned(),
+            format!("http://{addr}/mcp"),
+            None,
+            VersionPolicy::Auto,
+            None,
+        )
+        .expect("client should build");
+        let request = JsonRpcRequest::new(
+            crate::mcp::protocol::JsonRpcId::Number(1),
+            "tools/call",
+            Some(json!({ "name": "send", "arguments": {} })),
+        );
+        // The canned reply body (`{}`) is not a JSON-RPC response; this
+        // test only asserts on the request headers the client sent.
+        let _ = client
+            .send_modern_jsonrpc(
+                &request,
+                "2026-07-28",
+                &[("Region".to_owned(), "us-west1".to_owned())],
+                None,
+            )
+            .await;
+
+        let captured = server.await.expect("server task");
+        let lower = captured.to_ascii_lowercase();
+        assert!(
+            lower.contains("mcp-protocol-version: 2026-07-28"),
+            "{captured}"
+        );
+        assert!(lower.contains("mcp-method: tools/call"), "{captured}");
+        assert!(lower.contains("mcp-name: send"), "{captured}");
+        assert!(lower.contains("mcp-param-region: us-west1"), "{captured}");
+        assert!(
+            !lower.contains("mcp-session-id"),
+            "modern requests must not carry a session header: {captured}"
         );
     }
 }

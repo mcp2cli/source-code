@@ -5,7 +5,7 @@
 
 - Repository: https://github.com/mcp2cli/source-code
 - Version: 0.1.5
-- Protocol: MCP 2025-11-25
+- Protocol: MCP 2026-07-28 and 2025-11-25 (auto-negotiated via server/discover)
 - License: see LICENSE.md
 
 ---
@@ -580,7 +580,7 @@ MCP2CLI_DEFAULTS__TIMEOUT_SECONDS=30 email send --to user@example.com --subject 
 
 ## MCP Protocol Coverage
 
-Full MCP 2025-11-25 specification compliance:
+Full MCP specification compliance for 2026-07-28 (stateless, MRTR, tasks extension, subscriptions/listen) and 2025-11-25 (initialize handshake):
 
 | Feature | MCP method(s) |
 |---------|--------------|

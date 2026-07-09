@@ -34,12 +34,35 @@ email export --dataset full --format parquet --background
 email batch-process --input data.csv --background
 ```
 
-When `--background` is used:
+When `--background` is used, the wire mechanics follow the negotiated MCP revision:
+
+**MCP 2025-11-25 (experimental core tasks):**
 
 1. The request includes `_meta.task` to signal task augmentation
 2. If the server supports tasks, it returns a `TaskAccepted` response with a `task_id`
 3. mcp2cli creates a local job record linking the operation to the remote task
 4. The command returns immediately
+
+**MCP 2026-07-28 (`io.modelcontextprotocol/tasks` extension):**
+
+1. Every request already advertises the tasks extension in
+   `_meta["io.modelcontextprotocol/clientCapabilities"].extensions`
+2. The server decides per request whether to return a
+   `CreateTaskResult` (`resultType: "task"`) with a `taskId`, TTL, and
+   suggested `pollIntervalMs`
+3. mcp2cli creates the local job record and returns immediately
+
+On 2026-07-28 servers the extension is **server-directed**: a server may
+return a task even for a call without `--background`. In that case mcp2cli
+polls `tasks/get` transparently (honoring the server's `pollIntervalMs`)
+and returns the final result as if the call had been synchronous — the
+task machinery is invisible. If the task pauses in `input_required`,
+mcp2cli prompts for the embedded elicitation and submits the answers via
+`tasks/update` before resuming the poll.
+
+> `tasks/result` (the blocking retrieval method from 2025-11-25) was
+> removed in 2026-07-28 — completed tasks carry their `result` directly on
+> `tasks/get`, and mcp2cli maps the old operation accordingly.
 
 ---
 

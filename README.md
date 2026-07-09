@@ -141,23 +141,21 @@ email draft create --subject "New draft"
 
 ### Protocol Coverage
 
-Full [MCP 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) implementation. See the **[Protocol Coverage reference](docs/protocol-coverage.md)** for per-feature detail, source pointers, and CLI examples.
+Full dual-revision implementation of the Model Context Protocol — **[MCP 2026-07-28](https://modelcontextprotocol.io/specification/draft)** (stateless, per-request `_meta`, `server/discover`, MRTR, the tasks extension) **and** **[MCP 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)** (initialize handshake, sessions). By default mcp2cli probes with `server/discover` and falls back to the legacy handshake automatically, exactly as the 2026-07-28 backward-compatibility rules describe; pin either revision with `server.protocol_version`. See the **[Protocol Coverage reference](docs/protocol-coverage.md)** for per-feature, per-revision detail, source pointers, and CLI examples.
 
-| Category | Methods / notifications | mcp2cli surface |
-|---|---|---|
-| **Lifecycle** | `initialize`, `notifications/initialized`, `ping` | One handshake per session; `ping` exposed as a CLI command |
-| **Discovery** | `tools/list`, `resources/list`, `resources/templates/list`, `prompts/list` + `notifications/*/list_changed` | `ls` populates a persistent cache; list-change notifications invalidate it automatically |
-| **Tool invocation** | `tools/call` | Typed `clap` flags from JSON Schema (required/optional, enums, defaults, nested objects); progress token attached automatically |
-| **Resources** | `resources/read`, `resources/subscribe`, `resources/unsubscribe`, `notifications/resources/updated` | `get <URI>` for concrete reads; parameterised templates surface as commands; `subscribe`/`unsubscribe` stream change events |
-| **Prompts** | `prompts/get` | Each prompt becomes a command with typed argument flags derived from the prompt definition |
-| **Completions** | `completion/complete` | `complete` command with `ref` context (resource or prompt) per MCP 2025-11-25 |
-| **Logging** | `logging/setLevel`, `notifications/message` | `log level <LEVEL>`; server-emitted logs are surfaced as runtime events and written to the configured sinks |
-| **Progress** | `notifications/progress` + `_meta.progressToken` | Progress tokens auto-attached to long-running ops; ticks rendered to stderr or event sinks |
-| **Cancellation** | `notifications/cancelled` (bidirectional) | Ctrl+C sends a cancel for the in-flight request; inbound cancels are acknowledged |
-| **Elicitation** *(server→client)* | [`elicitation/create`](docs/features/elicitation-and-sampling.md) | Interactive terminal prompt — form mode (typed fields from JSON Schema) + URL mode (open-in-browser) |
-| **Sampling** *(server→client)* | [`sampling/createMessage`](docs/features/elicitation-and-sampling.md) | Human-in-the-loop review with tool display before forwarding to the LLM |
-| **Roots** *(server→client)* | `roots/list` | Client advertises configurable root URIs; servers query on demand |
-| **Tasks** *(MCP 2025-11-25)* | `tasks/get`, `tasks/result`, `tasks/cancel`, `_meta.task` on `tools/call` | [`--background`](docs/features/background-jobs.md) creates a task; `jobs show/wait/cancel/watch` tracks it across invocations |
+| Category | 2025-11-25 | 2026-07-28 | mcp2cli surface |
+|---|---|---|---|
+| **Lifecycle** | `initialize` + `notifications/initialized`, `ping` | stateless `_meta` on every request, `server/discover` | One handshake or probe per session; `ping` works in both (maps to `server/discover` on modern servers) |
+| **Discovery** | `tools/list`, `resources/list`, `resources/templates/list`, `prompts/list` + `notifications/*/list_changed` | same lists + `ttlMs`/`cacheScope` freshness hints | `ls` populates a persistent cache; list-change notifications / TTL hints keep it fresh |
+| **Tool invocation** | `tools/call` | `tools/call` + `resultType`, MRTR retries, `x-mcp-header` → `Mcp-Param-*` mirroring | Typed `clap` flags from JSON Schema; progress token attached automatically |
+| **Resources** | `resources/read`, `resources/subscribe`/`unsubscribe` | `resources/read` (MRTR-capable), `subscriptions/listen` | `get <URI>` for concrete reads; `subscribe` verifies the era-appropriate subscription |
+| **Prompts** | `prompts/get` | `prompts/get` (MRTR-capable) | Each prompt becomes a command with typed argument flags |
+| **Completions** | `completion/complete` with `ref.context` | same | `complete` command with `ref` context (resource or prompt) |
+| **Logging** | `logging/setLevel`, `notifications/message` | per-request `_meta["…/logLevel"]` | `log <LEVEL>` works in both; the level persists and is injected per-request on modern servers |
+| **Progress** | `notifications/progress` + `_meta.progressToken` | same (request-scoped stream) | Progress tokens auto-attached; ticks rendered to stderr or event sinks |
+| **Cancellation** | `notifications/cancelled` (bidirectional) | `notifications/cancelled` (stdio) / closing the response stream (HTTP) | Ctrl+C cancels the in-flight request |
+| **Server input** *(elicitation/sampling/roots)* | server-initiated JSON-RPC requests | [MRTR](docs/protocol-coverage.md#multi-round-trip-requests-2026-07-28): `resultType: "input_required"` + retry with `inputResponses` | Same interactive terminal prompts in both revisions |
+| **Tasks** | experimental core (`_meta.task`, `tasks/get`/`result`/`cancel`) | official `io.modelcontextprotocol/tasks` extension (`resultType: "task"`, polled `tasks/get`, `tasks/update`) | [`--background`](docs/features/background-jobs.md) creates a task; `jobs show/wait/cancel/watch` tracks it; unsolicited modern tasks are polled transparently |
 
 ### Operations
 
@@ -273,6 +271,7 @@ server:
   display_name: My MCP Server
   transport: stdio                       # or streamable_http
   endpoint: null                         # required for streamable_http
+  protocol_version: auto                 # auto | 2026-07-28 | 2025-11-25
   stdio:
     command: npx
     args: ['@modelcontextprotocol/server-everything']

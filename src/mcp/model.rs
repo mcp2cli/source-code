@@ -35,6 +35,9 @@ impl TransportKind {
 pub enum TaskState {
     Queued,
     Running,
+    /// The task is paused waiting for client input (MCP 2026-07-28
+    /// tasks extension; resolved via `tasks/update`).
+    InputRequired,
     Completed,
     Canceled,
     Failed,
@@ -45,6 +48,7 @@ impl TaskState {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
+            Self::InputRequired => "input_required",
             Self::Completed => "completed",
             Self::Canceled => "canceled",
             Self::Failed => "failed",
@@ -77,6 +81,12 @@ pub enum McpOperation {
         capability: String,
         arguments: Value,
         background: bool,
+        /// The tool's raw `inputSchema`, when the caller has it cached.
+        /// Used by the Streamable HTTP transport in MCP 2026-07-28 mode
+        /// to mirror `x-mcp-header`-annotated parameters into
+        /// `Mcp-Param-*` HTTP headers (SEP-2243).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_schema: Option<Value>,
     },
     ReadResource {
         uri: String,

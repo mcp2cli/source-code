@@ -47,11 +47,42 @@ server:
 
 ### How It Works
 
-1. **Initialization:** Sends `initialize` request with client capabilities
-2. **Session negotiation:** Server may return a session ID via `Mcp-Session-Id` header
-3. **Operations:** Each MCP operation is a POST with JSON-RPC body
-4. **SSE responses:** The server can stream responses as SSE events
-5. **Notifications:** Server notifications arrive via the SSE stream
+Behavior depends on the negotiated MCP protocol revision (see
+[Protocol version selection](#protocol-version-selection)):
+
+**MCP 2026-07-28 (stateless):**
+
+1. **Era probe:** POSTs `server/discover`; a `DiscoverResult` selects the stateless revision
+2. **No sessions:** the `Mcp-Session-Id` header is never sent
+3. **Request metadata headers:** every POST carries `MCP-Protocol-Version`, `Mcp-Method`, and (for `tools/call` / `resources/read` / `prompts/get`) `Mcp-Name`; values outside the header-safe ASCII range use the spec's `=?base64?…?=` encoding
+4. **Custom param headers:** tool parameters annotated with `x-mcp-header` in the input schema are mirrored as `Mcp-Param-*` headers; tools with invalid annotations are excluded from discovery
+5. **SSE responses:** the server may stream request-scoped notifications followed by the final response
+6. **Server input requests:** delivered as `resultType: "input_required"` results (MRTR) and resolved by retrying the request — never as server-initiated JSON-RPC requests
+7. **Change notifications:** delivered on a `subscriptions/listen` POST response stream
+8. **Cancellation:** closing the response stream cancels the request
+
+**MCP 2025-11-25 (legacy):**
+
+1. **Initialization:** sends `initialize` request with client capabilities
+2. **Session negotiation:** server may return a session ID via `Mcp-Session-Id` header
+3. **Operations:** each MCP operation is a POST with JSON-RPC body
+4. **SSE responses:** the server can stream responses as SSE events
+5. **Notifications:** server notifications arrive via the SSE stream
+
+### Protocol version selection
+
+By default (`server.protocol_version: auto`) mcp2cli probes with
+`server/discover` and falls back to the 2025-11-25 `initialize` handshake
+when the server does not answer with a recognised modern response — the
+exact backward-compatibility algorithm from the 2026-07-28 spec. Pin a
+revision to skip detection:
+
+```yaml
+server:
+  transport: streamable_http
+  endpoint: https://mcp.example.com/email
+  protocol_version: "2026-07-28"   # or "2025-11-25", or auto (default)
+```
 
 ### Authentication
 

@@ -408,6 +408,7 @@ fn build_adhoc_config(transport: &AdHocTransport) -> (AppConfig, String) {
                     transport: TransportKind::StreamableHttp,
                     endpoint: Some(url.clone()),
                     stdio: StdioServerConfig::default(),
+                    protocol_version: None,
                 },
                 ..AppConfig::default()
             };
@@ -436,6 +437,7 @@ fn build_adhoc_config(transport: &AdHocTransport) -> (AppConfig, String) {
                         cwd: None,
                         env: env.iter().cloned().collect(),
                     },
+                    protocol_version: None,
                 },
                 ..AppConfig::default()
             };
@@ -467,6 +469,7 @@ mod tests {
         write_named_config(
             &layout,
             &ConfigCreateOptions {
+                protocol_version: None,
                 name: "work".to_owned(),
                 app_profile: "bridge".to_owned(),
                 transport: crate::mcp::model::TransportKind::StreamableHttp,
@@ -515,6 +518,7 @@ mod tests {
         write_named_config(
             &layout,
             &ConfigCreateOptions {
+                protocol_version: None,
                 name: "work".to_owned(),
                 app_profile: "bridge".to_owned(),
                 transport: crate::mcp::model::TransportKind::StreamableHttp,
@@ -601,6 +605,7 @@ mod tests {
         write_named_config(
             &layout,
             &ConfigCreateOptions {
+                protocol_version: None,
                 name: "work".to_owned(),
                 app_profile: "bridge".to_owned(),
                 transport: crate::mcp::model::TransportKind::StreamableHttp,

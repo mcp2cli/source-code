@@ -7,6 +7,10 @@ server:
   display_name: Demo MCP Bridge Server
   transport: streamable_http
   endpoint: https://demo.invalid/mcp
+  # MCP protocol revision: auto (default) probes with server/discover and
+  # falls back to the 2025-11-25 initialize handshake; pin 2026-07-28 or
+  # 2025-11-25 to skip detection.
+  # protocol_version: auto
   stdio:
     command: null
     args: []

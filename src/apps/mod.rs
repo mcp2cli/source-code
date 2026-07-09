@@ -93,6 +93,25 @@ impl AppContext {
         )
         .await
     }
+
+    /// Look up a tool's cached `inputSchema` from the persisted discovery
+    /// inventory. Used to mirror `x-mcp-header`-annotated parameters into
+    /// HTTP headers on MCP 2026-07-28 servers (SEP-2243); `None` simply
+    /// means the request goes out without `Mcp-Param-*` headers.
+    pub async fn cached_tool_input_schema(&self, tool_name: &str) -> Option<Value> {
+        let inventory = self
+            .services
+            .state_store
+            .discovery_inventory_view(&self.config_name)
+            .await?;
+        inventory
+            .tools
+            .as_deref()?
+            .iter()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(tool_name))
+            .and_then(|item| item.get("inputSchema"))
+            .cloned()
+    }
 }
 
 pub fn default_job_overview_lines(job: &JobRecord) -> Vec<String> {
