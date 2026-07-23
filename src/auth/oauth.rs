@@ -470,7 +470,21 @@ fn write_response_status(stream: &mut std::net::TcpStream, status: &str, body: &
     );
     stream
         .write_all(response.as_bytes())
-        .context("failed to write OAuth response")
+        .context("failed to write OAuth response")?;
+
+    // Drain any bytes still unread in this socket's receive buffer
+    // before the caller drops the connection. On some platforms,
+    // closing a socket with unread inbound data pending sends a hard
+    // RST instead of a graceful FIN — which can discard the response
+    // just written from the peer's perspective, even though
+    // write_all() above already handed it to the kernel. The request
+    // this replies to is a single small HTTP request line the caller
+    // read with one read() call, so there's normally nothing left; this
+    // is a bounded, best-effort safety net in case any is.
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(50)));
+    let mut discard = [0_u8; 4096];
+    while matches!(stream.read(&mut discard), Ok(n) if n > 0) {}
+    Ok(())
 }
 
 fn get_json<T: for<'de> Deserialize<'de>>(agent: &ureq::Agent, url: &str) -> Result<T> {
