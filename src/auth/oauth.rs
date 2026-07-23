@@ -81,7 +81,13 @@ struct CallbackData {
 pub fn login(options: OAuthLoginOptions) -> Result<OAuthLoginResult> {
     let endpoint_url = Url::parse(&options.endpoint)
         .with_context(|| format!("invalid MCP endpoint URL: {}", options.endpoint))?;
-    let agent = ureq::AgentBuilder::new().timeout(options.timeout).build();
+    // Trust the bundled webpki roots plus any SSL_CERT_FILE override (see
+    // crate::tls), so OAuth discovery and token exchange work behind the
+    // same corporate TLS-inspection proxies the MCP transport does.
+    let agent = ureq::AgentBuilder::new()
+        .timeout(options.timeout)
+        .tls_config(std::sync::Arc::new(crate::tls::client_config()))
+        .build();
 
     let protected = discover_protected_resource(&agent, &endpoint_url)?;
     let auth_server_url = protected.authorization_servers.first().ok_or_else(|| {
@@ -142,7 +148,7 @@ pub fn login(options: OAuthLoginOptions) -> Result<OAuthLoginResult> {
         eprintln!("Open the URL above manually, then complete the login in your browser.");
     }
 
-    let callback = wait_for_callback(listener, &state, options.timeout)?;
+    let callback = wait_for_callback(listener, &state, &metadata.issuer, options.timeout)?;
     let token = exchange_code(
         &agent,
         &metadata.token_endpoint,
@@ -312,9 +318,14 @@ fn exchange_code(
         })
 }
 
+/// Path component of the loopback redirect URI `login()` registers
+/// (`http://127.0.0.1:{port}/callback`).
+const CALLBACK_PATH: &str = "/callback";
+
 fn wait_for_callback(
     listener: TcpListener,
     expected_state: &str,
+    expected_issuer: &str,
     timeout: Duration,
 ) -> Result<CallbackData> {
     listener
@@ -326,37 +337,32 @@ fn wait_for_callback(
         match listener.accept() {
             Ok((mut stream, _addr)) => {
                 let request_path = read_request_path(&mut stream)?;
-                let callback_url = Url::parse(&format!("http://127.0.0.1{request_path}"))
+                let (path, query) = request_path.split_once('?').unwrap_or((&request_path, ""));
+
+                // Ignore anything that isn't the redirect URI's own path —
+                // a stray probe on the ephemeral loopback port (browser
+                // preflight, local port scanner) must not abort an
+                // in-flight login; keep listening for the real callback.
+                if path != CALLBACK_PATH {
+                    write_response_status(&mut stream, "404 Not Found", "")?;
+                    continue;
+                }
+
+                let callback_url = Url::parse(&format!("http://127.0.0.1?{query}"))
                     .context("failed to parse OAuth callback request")?;
                 let params: std::collections::HashMap<_, _> =
                     callback_url.query_pairs().into_owned().collect();
 
-                if let Some(error) = params.get("error") {
-                    let description = params
-                        .get("error_description")
-                        .map(String::as_str)
-                        .unwrap_or("");
-                    write_callback_response(&mut stream, false)?;
-                    return Err(anyhow!(
-                        "authorization server returned error: {error} {description}"
-                    ));
+                match validate_callback_params(&params, expected_state, expected_issuer) {
+                    Ok(code) => {
+                        write_callback_response(&mut stream, true)?;
+                        return Ok(CallbackData { code });
+                    }
+                    Err(error) => {
+                        write_callback_response(&mut stream, false)?;
+                        return Err(error);
+                    }
                 }
-
-                let state = params
-                    .get("state")
-                    .ok_or_else(|| anyhow!("OAuth callback missing state"))?;
-                if state != expected_state {
-                    write_callback_response(&mut stream, false)?;
-                    return Err(anyhow!("OAuth callback state did not match"));
-                }
-
-                let code = params
-                    .get("code")
-                    .filter(|code| !code.is_empty())
-                    .ok_or_else(|| anyhow!("OAuth callback missing code"))?
-                    .to_owned();
-                write_callback_response(&mut stream, true)?;
-                return Ok(CallbackData { code });
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() >= deadline {
@@ -367,6 +373,54 @@ fn wait_for_callback(
             Err(error) => return Err(anyhow!("failed to accept OAuth callback: {error}")),
         }
     }
+}
+
+/// Validate the OAuth callback's query parameters and return the
+/// authorization code on success. Pure (no I/O) so it can be tested
+/// without a real socket.
+///
+/// - `state` must be present and match exactly (CSRF protection).
+/// - `iss`, when present, must match the discovered issuer — MCP
+///   2026-07-28 authorization hardening (RFC 9207 / SEP-2468): "MCP
+///   clients MUST validate a present iss against the recorded issuer
+///   before redeeming the authorization code." Absent `iss` is accepted,
+///   since the parameter is a SHOULD for authorization servers, not a
+///   MUST.
+fn validate_callback_params(
+    params: &std::collections::HashMap<String, String>,
+    expected_state: &str,
+    expected_issuer: &str,
+) -> Result<String> {
+    if let Some(error) = params.get("error") {
+        let description = params
+            .get("error_description")
+            .map(String::as_str)
+            .unwrap_or("");
+        return Err(anyhow!(
+            "authorization server returned error: {error} {description}"
+        ));
+    }
+
+    let state = params
+        .get("state")
+        .ok_or_else(|| anyhow!("OAuth callback missing state"))?;
+    if state != expected_state {
+        return Err(anyhow!("OAuth callback state did not match"));
+    }
+
+    if let Some(iss) = params.get("iss")
+        && iss != expected_issuer
+    {
+        return Err(anyhow!(
+            "OAuth callback iss '{iss}' did not match the discovered issuer '{expected_issuer}'"
+        ));
+    }
+
+    params
+        .get("code")
+        .filter(|code| !code.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| anyhow!("OAuth callback missing code"))
 }
 
 fn read_request_path(stream: &mut std::net::TcpStream) -> Result<String> {
@@ -402,13 +456,21 @@ fn write_callback_response(stream: &mut std::net::TcpStream, ok: bool) -> Result
             "OAuth login failed. Return to the terminal for details.",
         )
     };
+    write_response_status(stream, status, body)
+}
+
+/// Write a minimal `text/plain` HTTP response, used both for the OAuth
+/// callback outcome and for rejecting stray requests on the loopback port
+/// (anything that isn't the registered `/callback` path) without
+/// terminating the login attempt.
+fn write_response_status(stream: &mut std::net::TcpStream, status: &str, body: &str) -> Result<()> {
     let response = format!(
         "HTTP/1.1 {status}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
     );
     stream
         .write_all(response.as_bytes())
-        .context("failed to write OAuth callback response")
+        .context("failed to write OAuth response")
 }
 
 fn get_json<T: for<'de> Deserialize<'de>>(agent: &ureq::Agent, url: &str) -> Result<T> {
@@ -588,6 +650,116 @@ mod tests {
             parse_www_authenticate_param(header, "resource_metadata").as_deref(),
             Some("https://logdeck.example/.well-known/oauth-protected-resource")
         );
+    }
+
+    fn params(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn callback_validation_accepts_matching_state_with_no_iss() {
+        let code = validate_callback_params(
+            &params(&[("state", "s1"), ("code", "abc")]),
+            "s1",
+            "https://issuer.example",
+        )
+        .expect("callback should validate");
+        assert_eq!(code, "abc");
+    }
+
+    #[test]
+    fn callback_validation_accepts_matching_iss() {
+        let code = validate_callback_params(
+            &params(&[
+                ("state", "s1"),
+                ("code", "abc"),
+                ("iss", "https://issuer.example"),
+            ]),
+            "s1",
+            "https://issuer.example",
+        )
+        .expect("callback should validate");
+        assert_eq!(code, "abc");
+    }
+
+    #[test]
+    fn callback_validation_rejects_mismatched_iss() {
+        // RFC 9207 / SEP-2468: a present `iss` MUST match the discovered
+        // issuer before the code is redeemed — this is what stops an
+        // authorization-server mix-up (confused deputy) attack.
+        let error = validate_callback_params(
+            &params(&[
+                ("state", "s1"),
+                ("code", "abc"),
+                ("iss", "https://attacker.example"),
+            ]),
+            "s1",
+            "https://issuer.example",
+        )
+        .expect_err("mismatched iss must be rejected");
+        assert!(error.to_string().contains("iss"), "{error}");
+    }
+
+    #[test]
+    fn callback_validation_rejects_mismatched_state() {
+        let error = validate_callback_params(
+            &params(&[("state", "wrong"), ("code", "abc")]),
+            "s1",
+            "https://issuer.example",
+        )
+        .expect_err("mismatched state must be rejected");
+        assert!(error.to_string().contains("state"), "{error}");
+    }
+
+    #[test]
+    fn callback_validation_surfaces_authorization_server_errors() {
+        let error = validate_callback_params(
+            &params(&[("error", "access_denied"), ("state", "s1")]),
+            "s1",
+            "https://issuer.example",
+        )
+        .expect_err("an error callback must be rejected");
+        assert!(error.to_string().contains("access_denied"), "{error}");
+    }
+
+    #[test]
+    fn stray_request_on_loopback_port_does_not_abort_the_login_attempt() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let handle = thread::spawn(move || {
+            wait_for_callback(
+                listener,
+                "expected-state",
+                "https://issuer.example",
+                Duration::from_secs(5),
+            )
+        });
+
+        // A stray request to a path other than /callback (e.g. a browser
+        // preflight or a local port probe) must be answered and ignored,
+        // not treated as the OAuth callback.
+        let mut stray = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stray
+            .write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .unwrap();
+        let mut response = String::new();
+        stray.set_read_timeout(Some(Duration::from_secs(2))).ok();
+        std::io::Read::read_to_string(&mut stray, &mut response).ok();
+        assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+
+        // The real callback must still complete the login.
+        let mut real = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        real.write_all(
+            b"GET /callback?code=real-code&state=expected-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        )
+        .unwrap();
+
+        let result = handle.join().unwrap().expect("callback should complete");
+        assert_eq!(result.code, "real-code");
     }
 
     #[cfg(unix)]

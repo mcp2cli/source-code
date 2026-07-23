@@ -171,9 +171,17 @@ auth:
 authorization server metadata, dynamically registers a loopback redirect URI,
 opens the authorization URL, and stores the resulting bearer token. The
 authorization request includes the MCP `resource` parameter and uses PKCE S256.
+The loopback callback validates the CSRF `state` on every request, ignores
+requests to any path other than the registered redirect URI (a stray probe
+on the ephemeral port can't derail an in-flight login), and — per the MCP
+2026-07-28 authorization hardening (RFC 9207 / SEP-2468) — rejects a present
+`iss` parameter that doesn't match the discovered issuer.
 
 If you already have a bearer token, pipe it or pass `--input-json`; this bypasses
-browser OAuth and stores the token directly.
+browser OAuth and stores the token directly. `auth login` only reads stdin when
+you actually pipe something to it — running from a script, CI runner, or IDE
+terminal with nothing piped falls straight through to browser OAuth rather than
+blocking.
 
 ---
 

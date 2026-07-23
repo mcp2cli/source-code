@@ -1588,7 +1588,7 @@ async fn auth_login(context: &AppContext) -> Result<CommandOutput> {
 /// CI-mode flags. Resolution order:
 ///
 /// 1. `--input-json '{"bearer_token": "...", "account": "..."}'` (account optional).
-/// 2. A bearer token piped on stdin (non-TTY), e.g. `echo "$TOKEN" | … auth login`.
+/// 2. A bearer token piped on stdin, e.g. `echo "$TOKEN" | … auth login`.
 /// 3. `--non-interactive` with no token available → fail fast (no prompt).
 /// 4. Otherwise return `None` so HTTP configs can start browser OAuth.
 fn resolve_login_credentials(context: &AppContext) -> Result<Option<(String, Option<String>)>> {
@@ -1618,17 +1618,22 @@ fn resolve_login_credentials(context: &AppContext) -> Result<Option<(String, Opt
         return Ok(Some((token.to_owned(), account)));
     }
 
-    // 2. Piped stdin (non-interactive shells, CI pipelines).
+    // 2. A bearer token piped on stdin, e.g. `echo "$TOKEN" | … auth login`.
+    //    Reading (rather than requiring a TTY check to *decide* whether to
+    //    read) is what actually distinguishes "a token was piped" from
+    //    "stdin just isn't a controlling TTY" — the latter is the normal
+    //    state in CI runners, process supervisors, IDE terminals, and
+    //    sandboxed shells even when nothing was piped, and those
+    //    HTTP-transport users still need to reach browser OAuth in step 4.
+    //    An empty read (immediate EOF: `/dev/null`, a closed pipe, a
+    //    redirect with nothing behind it) is therefore *not* an error here
+    //    — it just means step 2 doesn't apply, and control falls through
+    //    to steps 3/4 same as if stdin were a terminal.
     if !std::io::stdin().is_terminal() {
         let token = read_bearer_token_from_stdin()?;
-        if token.is_empty() {
-            return Err(anyhow!(
-                "auth login received empty stdin; pipe a bearer token \
-                 (echo \"$TOKEN\" | … auth login) or pass \
-                 --input-json '{{\"bearer_token\": \"<token>\"}}'"
-            ));
+        if !token.is_empty() {
+            return Ok(Some((token, None)));
         }
-        return Ok(Some((token, None)));
     }
 
     // 3. Non-interactive with nothing to read — fail rather than block.
