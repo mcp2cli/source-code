@@ -119,6 +119,14 @@ pub trait McpClient: Send + Sync {
         let _ = (request_id, reason);
         Ok(()) // default no-op for transports that don't support it
     }
+
+    /// Whether this invocation was routed through a running `mcp2cli
+    /// daemon` (a warm, already-negotiated connection) rather than
+    /// connecting fresh. Used only for the coarse `daemon_active`
+    /// telemetry dimension — never anything identifying the daemon.
+    fn is_daemon(&self) -> bool {
+        false
+    }
 }
 
 /// Perform an MCP operation with an optional timeout.
@@ -4072,5 +4080,9 @@ impl McpClient for DaemonMcpClient {
         _inventory_stale_path: Option<&std::path::PathBuf>,
     ) -> Result<McpOperationResult> {
         crate::runtime::daemon::daemon_perform(&self.socket_path, &operation).await
+    }
+
+    fn is_daemon(&self) -> bool {
+        true
     }
 }

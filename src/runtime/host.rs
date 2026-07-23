@@ -100,6 +100,34 @@ impl RuntimeHost {
         }
     }
 
+    /// Whether a profile overlay is active for the selected config.
+    /// Telemetry-only signal — never the profile's name or content.
+    pub fn profile_active(&self) -> bool {
+        self.selected_config
+            .as_ref()
+            .is_some_and(|config| config.config.profile.is_some())
+    }
+
+    /// Whether this invocation is routed through a running `mcp2cli
+    /// daemon` rather than a fresh connection.
+    pub fn daemon_active(&self) -> bool {
+        self.mcp_client.is_daemon()
+    }
+
+    /// The negotiated MCP protocol era (`"legacy"` or `"modern"`) for the
+    /// active session, if one has been negotiated. `None` covers every
+    /// case where the concept doesn't apply: host commands, ad-hoc
+    /// connections that never reached a server, and daemon-routed calls
+    /// (the daemon IPC protocol doesn't currently surface it).
+    /// Telemetry-only — a coarse two-value signal, never a server
+    /// identity or endpoint.
+    pub async fn negotiated_protocol_era(&self) -> Option<&'static str> {
+        self.mcp_client
+            .negotiated_session()
+            .await
+            .map(|session| session.era.as_str())
+    }
+
     pub async fn run(&self, target: DispatchTarget) -> Result<()> {
         match target {
             DispatchTarget::AppConfig {

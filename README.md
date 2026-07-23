@@ -460,16 +460,18 @@ mcp2cli collects **anonymous, non-sensitive** usage telemetry to help us underst
 
 - Command category (e.g. "tool_invoke", "discover", "auth" — **never** the actual tool/prompt name)
 - Transport type used (stdio, HTTP)
+- Negotiated MCP protocol era (`legacy` 2025-11-25 vs. `modern` 2026-07-28), when a session was negotiated
 - Whether features like `--json`, `--background`, `--timeout`, daemon, profile overlay, or ad-hoc mode were used
 - Outcome (success/error) and duration in milliseconds
-- OS, architecture, and CLI version
+- OS family, architecture, and CLI version
 - A random installation UUID (not tied to your identity)
 
 ### What is NOT collected
 
 - No server endpoints, URIs, tool names, argument values, file paths, or configuration content
-- No IP addresses or user identifiers
+- No IP addresses, hostnames, usernames, or process IDs
 - No environment variables or credentials
+- No error messages — only a coarse success/error outcome
 
 ### How to opt out
 
