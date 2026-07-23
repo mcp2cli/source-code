@@ -4,7 +4,7 @@
 > Tools become verbs. Resources become nouns. Prompts become workflows.
 
 - Repository: https://github.com/mcp2cli/source-code
-- Version: 0.1.7
+- Version: 0.1.8
 - Protocol: MCP 2026-07-28 and 2025-11-25 (auto-negotiated via server/discover)
 - License: see LICENSE.md
 

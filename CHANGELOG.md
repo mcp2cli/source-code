@@ -1,3 +1,13 @@
+## 0.1.8 (2026-07-23)
+
+### Features
+
+- **telemetry:** migrate to telemetry.mcp2cli.dev, fix delivery, add insights
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.7 (2026-07-23)
 
 ### Features
