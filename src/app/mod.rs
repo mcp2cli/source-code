@@ -151,12 +151,20 @@ pub async fn run(state: AppState) -> Result<()> {
             has_json,
             has_bg,
             has_timeout,
-            false, // profile detection would require config access
-            false, // daemon detection would require runtime check
+            state.runtime.profile_active(),
+            state.runtime.daemon_active(),
             ad_hoc,
+            state.runtime.negotiated_protocol_era().await,
             outcome,
             timer.elapsed(),
         );
+
+        // The user's output is already on screen by this point — this
+        // only bounds how much longer the process takes to actually
+        // exit, giving the shipping thread spawned by record_command a
+        // real (short) chance to complete before it would otherwise be
+        // killed outright at process exit. See TelemetryRecorder::flush.
+        recorder.flush();
     }
 
     result

@@ -23,13 +23,43 @@ The system is designed with three principles:
 
 ## Default collector
 
-Out of the box, batched events are POSTed to
-`https://otel.mcp2cli.dev/v1/traces` as **OTLP/HTTP JSON
-spans** — the standard OpenTelemetry wire format. Any OTEL
-Collector can ingest them natively. No third-party trackers.
+Out of the box, events are converted to **OTLP/HTTP JSON spans** — the
+standard OpenTelemetry wire format — and POSTed to
+
+```text
+https://telemetry.mcp2cli.dev/v1/traces
+```
+
+the tsok observability stack's dedicated ingest endpoint (Grafana +
+Tempo/Loki/Prometheus). Any OTEL Collector can ingest the same payload
+natively. No third-party trackers.
+
+Every batch carries a `service.namespace = "mcp2cli"` **resource**
+attribute — that's what actually files the data under the mcp2cli
+project on a backend shared across multiple projects; the endpoint URL
+itself carries no project identity. If you ever redirect `telemetry.endpoint`
+at your own collector (see [Option B](#option-b-built-in-http-shipping)
+below), that attribute travels with it regardless of destination.
+
 Override the URL with `telemetry.endpoint` in your config, set it
 to `null` to keep events purely local, or opt out entirely via any
 of the mechanisms below.
+
+### Verifying the endpoint is reachable
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://telemetry.mcp2cli.dev/v1/traces \
+  -H 'Content-Type: application/json' --data '{"resourceSpans":[]}'
+# expect 200
+```
+
+The endpoint is OTLP/HTTP only (JSON or protobuf, no gRPC), requires no
+auth (identity is purely the resource attributes in the payload), and is
+rate-limited to 100 requests/second (200 burst) per source IP — mcp2cli's
+shipper already backs off gracefully on a `429` by simply leaving the
+batch on local disk for the next invocation to retry, so this never
+surfaces as a user-visible error.
 
 ## CLI telemetry is independent of the website
 
@@ -48,14 +78,14 @@ they both come from the same project.
 
 ## What's Collected
 
-Each CLI invocation produces one event with this schema:
+Each CLI invocation produces one event, held locally in this schema:
 
 ```json
 {
   "schema": 1,
   "installation_id": "550e8400-e29b-41d4-a716-446655440000",
   "timestamp": "2026-03-30T14:22:00Z",
-  "cli_version": "0.1.0",
+  "cli_version": "0.1.7",
   "os": "linux",
   "arch": "x86_64",
   "event": {
@@ -68,6 +98,7 @@ Each CLI invocation produces one event with this schema:
     "profile_active": true,
     "daemon_active": false,
     "ad_hoc": false,
+    "protocol_era": "modern",
     "outcome": "success",
     "duration_ms": 342
   }
@@ -81,7 +112,7 @@ Each CLI invocation produces one event with this schema:
 | `schema` | Event schema version for forward compatibility | `1` |
 | `installation_id` | Random UUID per installation — not user-identifying | UUID v4 |
 | `timestamp` | When the command ran (UTC) | ISO-8601 |
-| `cli_version` | mcp2cli version | `"0.1.0"` |
+| `cli_version` | mcp2cli version | `"0.1.7"` |
 | `os` | Operating system family | `"linux"`, `"macos"`, `"windows"` |
 | `arch` | CPU architecture | `"x86_64"`, `"aarch64"` |
 | `command_category` | What type of command (NOT the actual name) | See table below |
@@ -90,10 +121,56 @@ Each CLI invocation produces one event with this schema:
 | `background` | Whether `--background` was used | `true`/`false` |
 | `timeout_override` | Whether `--timeout` was explicitly set | `true`/`false` |
 | `profile_active` | Whether a profile overlay was in use | `true`/`false` |
-| `daemon_active` | Whether daemon mode was active | `true`/`false` |
+| `daemon_active` | Whether the invocation was routed through a running `mcp2cli daemon` | `true`/`false` |
 | `ad_hoc` | Whether `--url`/`--stdio` ad-hoc mode was used | `true`/`false` |
-| `outcome` | Result of the command | `"success"`, `"error"` |
+| `protocol_era` | Negotiated MCP protocol revision, when a session was negotiated | `"legacy"` (2025-11-25), `"modern"` (2026-07-28), absent |
+| `outcome` | Result of the command — never the error message itself | `"success"`, `"error"` |
 | `duration_ms` | Wall-clock time in milliseconds | `342` |
+
+### What actually goes over the wire
+
+The schema above is the **local** NDJSON format. When shipping to an HTTP
+endpoint, events are converted into a real OTLP/HTTP JSON `resourceSpans`
+batch — one span per event, one shared resource block per batch:
+
+```json
+{
+  "resourceSpans": [{
+    "resource": {
+      "attributes": [
+        { "key": "service.name", "value": { "stringValue": "mcp2cli-cli" } },
+        { "key": "service.namespace", "value": { "stringValue": "mcp2cli" } },
+        { "key": "service.version", "value": { "stringValue": "0.1.7" } },
+        { "key": "mcp2cli.os", "value": { "stringValue": "linux" } },
+        { "key": "mcp2cli.arch", "value": { "stringValue": "x86_64" } }
+      ]
+    },
+    "scopeSpans": [{
+      "scope": { "name": "mcp2cli.telemetry", "version": "1" },
+      "spans": [{
+        "traceId": "…", "spanId": "…",
+        "name": "command_run",
+        "startTimeUnixNano": "…", "endTimeUnixNano": "…",
+        "attributes": [
+          { "key": "mcp2cli.installation_id", "value": { "stringValue": "…" } },
+          { "key": "mcp2cli.command.category", "value": { "stringValue": "tool_invoke" } },
+          { "key": "mcp2cli.transport", "value": { "stringValue": "streamable_http" } },
+          { "key": "mcp2cli.outcome", "value": { "stringValue": "success" } },
+          { "key": "mcp2cli.protocol_era", "value": { "stringValue": "modern" } },
+          { "key": "mcp2cli.duration_ms", "value": { "intValue": "342" } }
+        ],
+        "status": { "code": 1 }
+      }]
+    }]
+  }]
+}
+```
+
+`service.namespace` and `service.name` are **resource** attributes
+(describe the sending application), not span attributes — this is
+deliberate: a dashboard that groups by project reads the resource block,
+not per-event fields. Every other collected field is a span attribute,
+namespaced under `mcp2cli.*`.
 
 ### Command Categories
 
@@ -136,7 +213,9 @@ This is explicit and permanent — these items will never be added:
 - **No file paths** — we don't know your directory structure
 - **No config content** — we don't read your YAML beyond telemetry settings
 - **No environment variables** — we don't see your credentials or secrets
-- **No IP addresses** — the local NDJSON mode has no network component
+- **No error messages or stack traces** — `outcome` is a coarse `success`/`error`, nothing more
+- **No hostname, username, or process ID** — never sent as OTel resource attributes, even though those are common conventions for other kinds of telemetry
+- **No IP addresses recorded by us** — the local NDJSON mode has no network component; the shipped HTTP request necessarily has a source IP at the transport layer like any request, but mcp2cli never reads or records it
 - **No user identifiers** — the installation_id is a random UUID
 
 ---
@@ -227,7 +306,17 @@ cat ~/.local/share/mcp2cli/telemetry_id
 
 ## Setting Up a Collection Backend
 
-The mcp2cli telemetry system is vendor-agnostic. Events are NDJSON — any system that accepts JSON can be a backend.
+The mcp2cli telemetry system is vendor-agnostic. Locally, events are
+NDJSON — any system that accepts JSON can be a backend. Two different
+integration points below, don't confuse them:
+
+- **Option A and C–F** read `telemetry.ndjson` directly, on their own
+  schedule (a cron job, a manual relay script, …) — they never touch
+  mcp2cli's own HTTP shipping and can use whatever wire format you want,
+  since you own both ends.
+- **Option B** reconfigures mcp2cli's *built-in* shipper (the one that
+  talks to the default collector by default) to POST to your URL instead
+  — that one always sends real OTLP/HTTP JSON, never a bespoke format.
 
 ### Architecture Options
 
@@ -339,26 +428,33 @@ http.createServer((req, res) => {
 
 ### Option B: Built-in HTTP Shipping
 
-Configure the mcp2cli to POST events directly to your endpoint:
+Redirect mcp2cli's own shipper — the same one that talks to the default
+collector — at your endpoint instead:
 
 ```yaml
 telemetry:
   enabled: true
-  endpoint: "https://your-collector.example.com/v1/events"
+  endpoint: "https://your-collector.example.com/v1/traces"
   batch_size: 25
 ```
 
-Events are batched locally and shipped as a JSON array when the batch is full. The endpoint receives:
+Unlike Options A and C–F below (which read the local NDJSON file
+independently, on your own schedule), this is what mcp2cli's *built-in*
+shipper sends, to whatever URL you configure. It always sends a real
+**OTLP/HTTP JSON `resourceSpans` batch** — see [What actually goes over
+the wire](#what-actually-goes-over-the-wire) above for the exact shape —
+not a plain JSON array of the local event schema. `batch_size` caps how
+many pending local events go into one POST; a batch is attempted on every
+invocation that has something pending, not only once `batch_size` is
+reached. Your collector needs to speak OTLP/HTTP (any OpenTelemetry
+Collector receiver does this natively) or translate it — see the
+[OTLP/HTTP spec](https://opentelemetry.io/docs/specs/otlp/#otlphttp) if
+you're writing a custom one.
 
-```http
-POST /v1/events HTTP/1.1
-Content-Type: application/json
-
-[
-  {"schema":1,"installation_id":"...","event":{"type":"command_run",...}},
-  {"schema":1,"installation_id":"...","event":{"type":"command_run",...}}
-]
-```
+A shipping attempt only removes events from the local file after a
+confirmed `2xx` response; any other outcome (network error, timeout,
+non-2xx status) leaves them in place for the next invocation to retry, so
+a temporarily unreachable collector never loses data.
 
 ---
 
@@ -656,6 +752,8 @@ Use this checklist to verify the telemetry implementation meets privacy requirem
 - [ ] Events contain no argument values or payloads
 - [ ] Events contain no file paths
 - [ ] Events contain no environment variables
+- [ ] Events contain no error messages or stack traces (`outcome` only)
+- [ ] Shipped OTLP resource attributes contain no hostname, username, or process ID
 - [ ] Installation ID is a random UUID (not derived from user info)
 - [ ] Opt-out via config works (`telemetry.enabled: false`)
 - [ ] Opt-out via env var works (`MCP2CLI_TELEMETRY=off`)

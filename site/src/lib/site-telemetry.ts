@@ -1,11 +1,14 @@
 /**
  * Browser-side OpenTelemetry for mcp2cli.dev.
  *
- * Emits OTLP/HTTP JSON spans to the same OTEL Collector the CLI
- * uses (`https://otel.mcp2cli.dev/v1/traces`), but with its own
- * `service.name = "mcp2cli-site"` and a session-scoped anonymous
- * session id. No identifier leaks to the CLI or the installer —
- * each surface has its own independent telemetry stream.
+ * Emits OTLP/HTTP JSON spans to the same tsok observability stack the
+ * CLI uses (`https://telemetry.mcp2cli.dev/v1/traces`), tagged with
+ * `service.namespace = "mcp2cli"` (the resource attribute that actually
+ * files data under the mcp2cli project on the shared backend — the
+ * endpoint URL alone does not) plus its own `service.name =
+ * "mcp2cli-site"` and a session-scoped anonymous session id. No
+ * identifier leaks to the CLI or the installer — each surface has its
+ * own independent telemetry stream.
  *
  * Opt-out signals respected before any span is ever emitted:
  *   - `navigator.doNotTrack === '1'`
@@ -19,7 +22,8 @@ import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
-const OTLP_ENDPOINT = 'https://otel.mcp2cli.dev/v1/traces';
+const OTLP_ENDPOINT = 'https://telemetry.mcp2cli.dev/v1/traces';
+const SERVICE_NAMESPACE = 'mcp2cli';
 const SERVICE_NAME = 'mcp2cli-site';
 const TRACER_NAME = 'mcp2cli.site';
 
@@ -69,6 +73,7 @@ export function initSiteTelemetry(): void {
   const provider = new WebTracerProvider({
     resource: resourceFromAttributes({
       'service.name': SERVICE_NAME,
+      'service.namespace': SERVICE_NAMESPACE,
       'service.version': '0.1.0',
       'session.id': sessionId,
     }),

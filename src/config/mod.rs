@@ -62,6 +62,24 @@ use crate::{mcp::model::TransportKind, output::OutputFormat};
 /// in the config tree (double-underscore is the nesting separator).
 const ENV_PREFIX: &str = "MCP2CLI_";
 
+/// Build the figment env provider for `MCP2CLI_*` overrides.
+///
+/// Excludes the bare `MCP2CLI_TELEMETRY` key: it's documented and
+/// tested as a simple on/off toggle
+/// (`crate::telemetry::TelemetryRecorder::is_enabled`), read directly
+/// from the process environment rather than through this merge. Without
+/// this exclusion, figment sees `MCP2CLI_TELEMETRY` as an override for
+/// the whole nested `telemetry` config *struct* (it shares a name with
+/// that section) and fails to deserialize the string `"off"` as one —
+/// which previously broke config loading outright for any command that
+/// set this env var, defeating the opt-out it was meant to provide.
+/// Nested overrides (`MCP2CLI_TELEMETRY__ENABLED=false`) are unaffected:
+/// `.split("__")` turns those into `"telemetry.enabled"`, which doesn't
+/// match the ignored bare key `"telemetry"`.
+fn env_provider() -> Env {
+    Env::prefixed(ENV_PREFIX).ignore(&["telemetry"]).split("__")
+}
+
 /// Root configuration model for a named MCP server binding.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
@@ -132,7 +150,7 @@ impl AppConfig {
 
         let mut figment = Figment::from(Serialized::defaults(AppConfig::default()));
         figment = figment.merge(Yaml::file(&config_path));
-        figment = figment.merge(Env::prefixed(ENV_PREFIX).split("__"));
+        figment = figment.merge(env_provider());
 
         let mut config: AppConfig = figment
             .extract()
@@ -825,6 +843,87 @@ mod tests {
             )
         );
         assert_eq!(loaded.config.plugins.search_dirs, Vec::<String>::new());
+    }
+
+    /// Regression test: `MCP2CLI_TELEMETRY=off` is documented and tested
+    /// (`telemetry::tests::disabled_by_env`) as a simple on/off toggle,
+    /// read directly from the environment by
+    /// `TelemetryRecorder::is_enabled`. But it shares a name with the
+    /// `telemetry` config section, and figment's env provider used to
+    /// merge it as an override for that whole nested struct — trying to
+    /// deserialize the string `"off"` as a `TelemetryConfig` and failing,
+    /// which broke config loading outright for every command that set
+    /// this env var. `env_provider()` now excludes the bare key.
+    ///
+    /// SAFETY: test-only env mutation; not behind a lock like the
+    /// telemetry/tls module tests use for the same variable, so a run
+    /// with `disabled_by_env` in `telemetry::tests` interleaved on
+    /// another thread could in principle race — accepted here to match
+    /// this codebase's existing convention for env-var tests.
+    #[test]
+    fn bare_telemetry_env_var_does_not_break_config_loading() {
+        let root = test_tempdir();
+        let layout = RuntimeLayout {
+            config_root: root.path().join("config"),
+            data_root: root.path().join("data"),
+            link_root: root.path().join("bin"),
+        };
+        write_named_config(
+            &layout,
+            &ConfigCreateOptions {
+                name: "telemetry-env".to_owned(),
+                app_profile: "bridge".to_owned(),
+                transport: TransportKind::StreamableHttp,
+                endpoint: Some("https://example.com/mcp".to_owned()),
+                protocol_version: None,
+                stdio_command: None,
+                stdio_args: Vec::new(),
+                force: false,
+            },
+        )
+        .expect("config should be created");
+
+        unsafe {
+            std::env::set_var("MCP2CLI_TELEMETRY", "off");
+        }
+        let loaded = AppConfig::load_named("telemetry-env", None, &layout);
+        unsafe {
+            std::env::remove_var("MCP2CLI_TELEMETRY");
+        }
+        loaded.expect("bare MCP2CLI_TELEMETRY=off must not break config loading");
+    }
+
+    #[test]
+    fn nested_telemetry_env_override_still_reaches_the_config() {
+        let root = test_tempdir();
+        let layout = RuntimeLayout {
+            config_root: root.path().join("config"),
+            data_root: root.path().join("data"),
+            link_root: root.path().join("bin"),
+        };
+        write_named_config(
+            &layout,
+            &ConfigCreateOptions {
+                name: "telemetry-nested".to_owned(),
+                app_profile: "bridge".to_owned(),
+                transport: TransportKind::StreamableHttp,
+                endpoint: Some("https://example.com/mcp".to_owned()),
+                protocol_version: None,
+                stdio_command: None,
+                stdio_args: Vec::new(),
+                force: false,
+            },
+        )
+        .expect("config should be created");
+
+        unsafe {
+            std::env::set_var("MCP2CLI_TELEMETRY__ENABLED", "false");
+        }
+        let loaded = AppConfig::load_named("telemetry-nested", None, &layout);
+        unsafe {
+            std::env::remove_var("MCP2CLI_TELEMETRY__ENABLED");
+        }
+        assert!(!loaded.expect("config should load").config.telemetry.enabled);
     }
 
     #[test]
