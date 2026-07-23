@@ -439,7 +439,8 @@ See [`docs/features/transports.md`](features/transports.md) and [`docs/features/
 ## Known gaps
 
 - **Pagination cursors.** Spec-defined `nextCursor` on `*/list` responses is not yet consumed — mcp2cli issues a single `list` request per primitive and treats the first page as the full inventory. Will matter for servers with very large tool/resource catalogs.
-- **Authorization (OAuth 2.1) flows.** `auth login` supports bearer-token capture and the stored-token lifecycle; end-to-end OAuth authorization-code with PKCE is partial — see [`docs/features/authentication.md`](features/authentication.md) for the current matrix. The 2026-07-28 authorization hardening (RFC 9207 `iss` validation, Client ID Metadata Documents, issuer-keyed credentials) applies to that flow and is tracked there.
+- **Authorization (OAuth 2.1) flows.** `auth login` supports bearer-token capture plus authorization-code + PKCE with dynamic client registration for streamable-HTTP servers, including RFC 9207 `iss` validation on the callback. Remaining gaps include Client ID Metadata Documents, pre-registered client config, refresh-token rotation, and runtime step-up authorization — see [`docs/features/authentication.md`](features/authentication.md) for the current matrix.
+- **Multi-root `notifications/roots/list_changed` debouncing.** Clients may spam the server if root config is hot-reloaded in a tight loop; there is no built-in debounce window.
 - **Long-lived `subscriptions/listen` watching.** The one-shot CLI verifies subscriptions (open → ack → release); holding a listen stream open for continuous updates is a natural fit for `mcp2cli daemon` and is not implemented yet.
 - **`ttlMs`-driven cache expiry.** Modern freshness hints are passed through in output but do not yet expire the discovery cache automatically.
 - **Trace context propagation.** OpenTelemetry `traceparent`/`tracestate` `_meta` conventions (SEP-414) are not emitted.

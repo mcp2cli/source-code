@@ -37,6 +37,7 @@ opt-level = 3
 [dependencies]
 anyhow = "1.0.98"
 async-trait = "0.1.89"
+base64 = "0.22"
 bytes = "1.10.1"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
 clap = { version = "4.5.38", features = ["derive", "string"] }
@@ -59,6 +60,7 @@ rustls-pemfile = "2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_yaml = "0.9.34"
+sha2 = "0.10"
 thiserror = "2.0.12"
 tokio = { version = "1.49.0", features = ["full"] }
 tracing = "0.1.41"

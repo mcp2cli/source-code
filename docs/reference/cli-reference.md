@@ -305,15 +305,16 @@ email get mail://thread/123
 ## Auth Commands
 
 ```bash
-email auth login           # Prompt for a bearer token (or read it from stdin)
+email auth login           # Start browser OAuth, or store a supplied bearer token
 email auth logout          # Clear stored credentials
 email auth status          # Show current auth state
 ```
 
-`auth login` reads a bearer token interactively, from a piped stdin
-(`echo "$TOKEN" | email auth login`), or from
+For streamable-HTTP configs, `auth login` starts OAuth authorization-code + PKCE
+when no token is supplied. Existing bearer-token workflows still work via piped
+stdin (`echo "$TOKEN" | email auth login`) or
 `--input-json '{"bearer_token": "<token>"}'`. With `--non-interactive` and no
-token available it fails fast instead of prompting.
+token available it fails fast.
 
 ---
 

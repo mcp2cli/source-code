@@ -26,7 +26,7 @@
 //! every MCP call, so timeouts, events, and telemetry behave
 //! identically to the dynamic path.
 
-use std::{ffi::OsString, io::IsTerminal, path::Path};
+use std::{ffi::OsString, io::IsTerminal, path::Path, time::Duration};
 
 use anyhow::{Result, anyhow};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, error::ErrorKind};
@@ -1477,7 +1477,71 @@ async fn auth_login(context: &AppContext) -> Result<CommandOutput> {
         return auth_login_demo(context).await;
     }
 
-    let (token, account) = resolve_login_credentials(context)?;
+    let (token, account, summary, mut lines, details) = if let Some((token, account)) =
+        resolve_login_credentials(context)?
+    {
+        (
+            token,
+            account,
+            "bearer token stored".to_owned(),
+            vec![
+                "status: authenticated".to_owned(),
+                format!("server: {}", context.config.server.display_name),
+            ],
+            json!({
+                "method": "bearer_token",
+            }),
+        )
+    } else {
+        if context.config.server.transport != TransportKind::StreamableHttp {
+            return Err(anyhow!(
+                "browser OAuth login requires streamable_http transport; pipe a bearer token for this server"
+            ));
+        }
+        let endpoint = context
+            .config
+            .server
+            .endpoint
+            .clone()
+            .ok_or_else(|| anyhow!("server.endpoint must be set for browser OAuth login"))?;
+        context
+            .services
+            .event_broker
+            .emit(RuntimeEvent::AuthPrompt {
+                app_id: context.config_name.clone(),
+                message: "open browser to complete OAuth login".to_owned(),
+            });
+        let oauth = crate::auth::oauth::login(crate::auth::oauth::OAuthLoginOptions {
+            endpoint,
+            browser_open_command: context.config.auth.browser_open_command.clone(),
+            timeout: Duration::from_secs(
+                context
+                    .timeout_override
+                    .unwrap_or(context.config.defaults.timeout_seconds)
+                    .max(1),
+            ),
+            client_name: format!("mcp2cli {}", context.config_name),
+        })?;
+        let mut lines = vec![
+            "status: authenticated".to_owned(),
+            format!("server: {}", context.config.server.display_name),
+            format!("issuer: {}", oauth.issuer),
+        ];
+        if let Some(expires_in) = oauth.expires_in {
+            lines.push(format!("expires_in: {}s", expires_in));
+        }
+        (
+            oauth.access_token,
+            oauth.account,
+            "OAuth login completed".to_owned(),
+            lines,
+            json!({
+                "method": "oauth_authorization_code_pkce",
+                "issuer": oauth.issuer,
+                "expires_in": oauth.expires_in,
+            }),
+        )
+    };
 
     let stored = StoredToken {
         bearer_token: token,
@@ -1503,34 +1567,31 @@ async fn auth_login(context: &AppContext) -> Result<CommandOutput> {
         .upsert_auth_session(record)
         .await?;
 
-    let mut lines = vec![
-        "status: authenticated".to_owned(),
-        format!("server: {}", context.config.server.display_name),
-    ];
     if let Some(account) = &account {
         lines.push(format!("account: {}", account));
     }
     Ok(CommandOutput::new(
         &context.config_name,
         "auth login",
-        "bearer token stored".to_owned(),
+        summary,
         lines,
         json!({
             "status": "authenticated",
             "server": context.config.server.display_name,
             "account": account,
+            "details": details,
         }),
     ))
 }
 
 /// Resolve the bearer token (and optional account) for `auth login`, honoring
-/// the CI-mode flags. Resolution order:
+/// CI-mode flags. Resolution order:
 ///
 /// 1. `--input-json '{"bearer_token": "...", "account": "..."}'` (account optional).
-/// 2. A bearer token piped on stdin (non-TTY), e.g. `echo "$TOKEN" | … auth login`.
+/// 2. A bearer token piped on stdin, e.g. `echo "$TOKEN" | … auth login`.
 /// 3. `--non-interactive` with no token available → fail fast (no prompt).
-/// 4. Otherwise prompt interactively on the terminal.
-fn resolve_login_credentials(context: &AppContext) -> Result<(String, Option<String>)> {
+/// 4. Otherwise return `None` so HTTP configs can start browser OAuth.
+fn resolve_login_credentials(context: &AppContext) -> Result<Option<(String, Option<String>)>> {
     // 1. Explicit JSON payload.
     if let Some(input) = &context.input_json {
         let object = input.as_object().ok_or_else(|| {
@@ -1554,20 +1615,25 @@ fn resolve_login_credentials(context: &AppContext) -> Result<(String, Option<Str
             .get("account")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned);
-        return Ok((token.to_owned(), account));
+        return Ok(Some((token.to_owned(), account)));
     }
 
-    // 2. Piped stdin (non-interactive shells, CI pipelines).
+    // 2. A bearer token piped on stdin, e.g. `echo "$TOKEN" | … auth login`.
+    //    Reading (rather than requiring a TTY check to *decide* whether to
+    //    read) is what actually distinguishes "a token was piped" from
+    //    "stdin just isn't a controlling TTY" — the latter is the normal
+    //    state in CI runners, process supervisors, IDE terminals, and
+    //    sandboxed shells even when nothing was piped, and those
+    //    HTTP-transport users still need to reach browser OAuth in step 4.
+    //    An empty read (immediate EOF: `/dev/null`, a closed pipe, a
+    //    redirect with nothing behind it) is therefore *not* an error here
+    //    — it just means step 2 doesn't apply, and control falls through
+    //    to steps 3/4 same as if stdin were a terminal.
     if !std::io::stdin().is_terminal() {
         let token = read_bearer_token_from_stdin()?;
-        if token.is_empty() {
-            return Err(anyhow!(
-                "auth login received empty stdin; pipe a bearer token \
-                 (echo \"$TOKEN\" | … auth login) or pass \
-                 --input-json '{{\"bearer_token\": \"<token>\"}}'"
-            ));
+        if !token.is_empty() {
+            return Ok(Some((token, None)));
         }
-        return Ok((token, None));
     }
 
     // 3. Non-interactive with nothing to read — fail rather than block.
@@ -1578,21 +1644,9 @@ fn resolve_login_credentials(context: &AppContext) -> Result<(String, Option<Str
         ));
     }
 
-    // 4. Interactive prompt.
-    context
-        .services
-        .event_broker
-        .emit(RuntimeEvent::AuthPrompt {
-            app_id: context.config_name.clone(),
-            message: "enter bearer token for authentication".to_owned(),
-        });
-    let token = read_bearer_token_from_stdin()?;
-    if token.is_empty() {
-        return Err(anyhow!(
-            "auth login requires a non-empty bearer token; pipe one via stdin or enter it interactively"
-        ));
-    }
-    Ok((token, None))
+    // 4. Interactive HTTP configs use browser OAuth. Users who need manual
+    // bearer-token login can still pipe the token or pass --input-json.
+    Ok(None)
 }
 
 async fn auth_login_demo(context: &AppContext) -> Result<CommandOutput> {

@@ -7,10 +7,13 @@ Manage server authentication with token persistence, interactive login, and auto
 ## Commands
 
 ```bash
-# Login — reads the bearer token from stdin, then falls back to a prompt
+# Login — starts browser OAuth for HTTP servers that advertise it
+email auth login
+
+# Login with an existing bearer token
 echo "$TOKEN" | email auth login
 
-# Login non-interactively (fails fast instead of prompting if no token is piped)
+# Login non-interactively with an existing bearer token
 echo "$TOKEN" | email auth login --non-interactive
 
 # Login with a structured payload
@@ -23,13 +26,13 @@ email auth status
 email auth logout
 ```
 
-`auth login` obtains the bearer token from one of three sources, in order:
+`auth login` resolves credentials in this order:
 
 1. **Piped stdin** — `echo "$TOKEN" | email auth login`.
 2. **`--input-json`** — a JSON object with the schema below.
-3. **Interactive prompt** — used only when neither of the above provides a token.
+3. **Browser OAuth** — for streamable-HTTP configs, mcp2cli discovers the server's OAuth metadata, dynamically registers a loopback client, starts authorization-code + PKCE, and stores the returned access token.
 
-Pass `--non-interactive` to skip the prompt and fail fast (useful in CI and scripts) when no token is supplied via stdin or `--input-json`.
+Pass `--non-interactive` to fail fast when no token is supplied via stdin or `--input-json`.
 
 ### `--input-json` schema
 
@@ -53,12 +56,18 @@ Pass `--non-interactive` to skip the prompt and fail fast (useful in CI and scri
 sequenceDiagram
     participant User
     participant CLI as mcp2cli
+    participant Auth as OAuth Server
     participant Store as Token Store
     participant Server as MCP Server
 
     User->>CLI: email auth login
-    CLI->>User: Enter token:
-    User->>CLI: sk-abc123
+    CLI->>Server: Discover protected resource metadata
+    CLI->>Auth: Register loopback OAuth client
+    CLI->>User: Open authorization URL
+    User->>Auth: Approve login in browser
+    Auth->>CLI: Redirect to loopback callback with code
+    CLI->>Auth: Exchange code + PKCE verifier
+    Auth-->>CLI: Bearer access token
     CLI->>Store: Store token for "email"
     CLI-->>User: Authenticated ✓
 
@@ -149,7 +158,8 @@ server:
 
 ## Browser-Based OAuth
 
-For servers that support OAuth browser flows:
+For streamable-HTTP servers that implement MCP OAuth discovery and dynamic
+client registration:
 
 ```yaml
 auth:
@@ -157,7 +167,21 @@ auth:
   # browser_open_command: "open"      # macOS
 ```
 
-When the server sends an `elicitation/create` with a URL during auth, mcp2cli opens the browser automatically.
+`auth login` discovers `/.well-known/oauth-protected-resource`, reads the
+authorization server metadata, dynamically registers a loopback redirect URI,
+opens the authorization URL, and stores the resulting bearer token. The
+authorization request includes the MCP `resource` parameter and uses PKCE S256.
+The loopback callback validates the CSRF `state` on every request, ignores
+requests to any path other than the registered redirect URI (a stray probe
+on the ephemeral port can't derail an in-flight login), and — per the MCP
+2026-07-28 authorization hardening (RFC 9207 / SEP-2468) — rejects a present
+`iss` parameter that doesn't match the discovered issuer.
+
+If you already have a bearer token, pipe it or pass `--input-json`; this bypasses
+browser OAuth and stores the token directly. `auth login` only reads stdin when
+you actually pipe something to it — running from a script, CI runner, or IDE
+terminal with nothing piped falls straight through to browser OAuth rather than
+blocking.
 
 ---
 

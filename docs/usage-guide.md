@@ -509,10 +509,13 @@ credentials.
 email auth login
 ```
 
-For **real servers** (non-demo), this prompts for a bearer token via stdin:
+For streamable-HTTP servers that advertise MCP OAuth metadata, this starts a
+browser authorization-code + PKCE flow and stores the returned bearer token.
 
-```text
-enter bearer token for email: <paste token>
+If you already have a bearer token, pipe it instead:
+
+```bash
+echo "$TOKEN" | email auth login
 ```
 
 The token is persisted in a file-backed token store at
