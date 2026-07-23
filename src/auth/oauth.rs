@@ -746,8 +746,12 @@ mod tests {
         stray
             .write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
             .unwrap();
+        // Generous bound: this only needs to be short in the failure
+        // case (a real hang); a busy CI runner can occasionally take a
+        // beat to schedule the server thread's accept/read/reply, which
+        // has nothing to do with what this test verifies.
         let mut response = String::new();
-        stray.set_read_timeout(Some(Duration::from_secs(2))).ok();
+        stray.set_read_timeout(Some(Duration::from_secs(5))).ok();
         std::io::Read::read_to_string(&mut stray, &mut response).ok();
         assert!(response.starts_with("HTTP/1.1 404"), "{response}");
 
