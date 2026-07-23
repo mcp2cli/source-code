@@ -130,7 +130,7 @@ const WIZARD_STEP: Step = {
     {
       id: 'background',
       label: 'email ... --background',
-      hint: 'Long-running job via the MCP 2025-11-25 tasks extension',
+      hint: 'Long-running job via the MCP tasks extension (2026-07-28 or 2025-11-25)',
       run: [
         { kind: 'prompt', text: 'email search --query "from:boss is:unread" --background' },
         { kind: 'output', text: '[email] invoking capability search', tone: 'muted' },

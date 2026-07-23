@@ -106,8 +106,8 @@ assert_json "initialize succeeds" \
   '.data' \
   inspect
 
-# 1.2 Server reports valid protocol version
-assert_json "protocol version is 2025-11-25 or compatible" \
+# 1.2 Server reports valid protocol version (2026-07-28 or 2025-11-25)
+assert_json "protocol version is negotiated" \
   '.data.protocol_version' \
   inspect
 

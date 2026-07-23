@@ -47,11 +47,42 @@ server:
 
 ### How It Works
 
-1. **Initialization:** Sends `initialize` request with client capabilities
-2. **Session negotiation:** Server may return a session ID via `Mcp-Session-Id` header
-3. **Operations:** Each MCP operation is a POST with JSON-RPC body
-4. **SSE responses:** The server can stream responses as SSE events
-5. **Notifications:** Server notifications arrive via the SSE stream
+Behavior depends on the negotiated MCP protocol revision (see
+[Protocol version selection](#protocol-version-selection)):
+
+**MCP 2026-07-28 (stateless):**
+
+1. **Era probe:** POSTs `server/discover`; a `DiscoverResult` selects the stateless revision
+2. **No sessions:** the `Mcp-Session-Id` header is never sent
+3. **Request metadata headers:** every POST carries `MCP-Protocol-Version`, `Mcp-Method`, and (for `tools/call` / `resources/read` / `prompts/get`) `Mcp-Name`; values outside the header-safe ASCII range use the spec's `=?base64?…?=` encoding
+4. **Custom param headers:** tool parameters annotated with `x-mcp-header` in the input schema are mirrored as `Mcp-Param-*` headers; tools with invalid annotations are excluded from discovery
+5. **SSE responses:** the server may stream request-scoped notifications followed by the final response
+6. **Server input requests:** delivered as `resultType: "input_required"` results (MRTR) and resolved by retrying the request — never as server-initiated JSON-RPC requests
+7. **Change notifications:** delivered on a `subscriptions/listen` POST response stream
+8. **Cancellation:** closing the response stream cancels the request
+
+**MCP 2025-11-25 (legacy):**
+
+1. **Initialization:** sends `initialize` request with client capabilities
+2. **Session negotiation:** server may return a session ID via `Mcp-Session-Id` header
+3. **Operations:** each MCP operation is a POST with JSON-RPC body
+4. **SSE responses:** the server can stream responses as SSE events
+5. **Notifications:** server notifications arrive via the SSE stream
+
+### Protocol version selection
+
+By default (`server.protocol_version: auto`) mcp2cli probes with
+`server/discover` and falls back to the 2025-11-25 `initialize` handshake
+when the server does not answer with a recognised modern response — the
+exact backward-compatibility algorithm from the 2026-07-28 spec. Pin a
+revision to skip detection:
+
+```yaml
+server:
+  transport: streamable_http
+  endpoint: https://mcp.example.com/email
+  protocol_version: "2026-07-28"   # or "2025-11-25", or auto (default)
+```
 
 ### Authentication
 
@@ -69,6 +100,34 @@ email auth login
 npx @modelcontextprotocol/server-everything streamableHttp
 # Listening on http://127.0.0.1:3001/mcp
 ```
+
+### Custom CA certificates (`SSL_CERT_FILE`)
+
+By default, HTTPS connections trust the bundled Mozilla root set
+(`webpki-roots`) — no system trust store is needed. In corporate
+environments that run a TLS-inspection proxy (mitmproxy, ZScaler,
+Cloudflare WARP, Fortinet, …), outbound HTTPS traffic is re-signed with a
+private root CA that isn't in that bundle, and connections fail with:
+
+```text
+Error: streamable HTTP request failed: client error (Connect)
+```
+
+Set `SSL_CERT_FILE` to a PEM file containing the extra CA certificate(s)
+to trust — the same convention curl, Python `requests`, Go's `net/http`,
+and Ruby's OpenSSL bindings use:
+
+```bash
+export SSL_CERT_FILE=/opt/corp/mitmproxy-ca-cert.pem
+email ls
+```
+
+The bundled roots are never removed — `SSL_CERT_FILE` only adds to the
+trust store, and unsetting it restores the default behavior exactly. This
+applies to every outbound HTTPS connection mcp2cli makes: the MCP
+transport, telemetry shipping, and OAuth login. An unset or unreadable
+`SSL_CERT_FILE` degrades to the bundled roots with a warning rather than
+failing outright.
 
 ---
 

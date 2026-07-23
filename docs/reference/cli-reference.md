@@ -64,6 +64,7 @@ mcp2cli config init --name <NAME> --app bridge \
   [--endpoint <URL>] \
   [--stdio-command <CMD>] \
   [--stdio-arg <ARG>]... \
+  [--protocol-version <auto|2026-07-28|2025-11-25>] \
   [--force]
 ```
 
@@ -75,6 +76,7 @@ mcp2cli config init --name <NAME> --app bridge \
 | `--endpoint <URL>` | for HTTP | Server endpoint URL |
 | `--stdio-command <CMD>` | for stdio | Subprocess command |
 | `--stdio-arg <ARG>` | | Subprocess argument (repeat for each arg) |
+| `--protocol-version <V>` | | MCP revision: `auto` (default), `2026-07-28`, `2025-11-25` |
 | `--force` | | Overwrite an existing config of the same name |
 
 ```bash
@@ -397,6 +399,7 @@ email send --args-file base.json --args-json '{"subject": "Hi"}' --to final@exam
 | `MCP2CLI_SERVER__TRANSPORT` | Override transport type |
 | `MCP2CLI_DEFAULTS__OUTPUT` | Override default output format |
 | `MCP2CLI_DEFAULTS__TIMEOUT_SECONDS` | Override default timeout |
+| `SSL_CERT_FILE` | Extra CA certificate(s) (PEM) to trust for every outbound HTTPS connection — MCP transport, telemetry, and OAuth — on top of the bundled roots. Same convention as curl/Python/Go. See [Transports](../features/transports.md#custom-ca-certificates-ssl_cert_file). |
 
 Pattern: `MCP2CLI_` prefix + config path with `__` as separator.
 

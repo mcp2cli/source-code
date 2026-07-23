@@ -41,6 +41,8 @@
 //!   formatters.
 //! - [`observability`] — tracing subscriber wiring.
 //! - [`telemetry`] — opt-in local telemetry sink.
+//! - [`tls`] — shared trust-store construction for every outbound HTTPS
+//!   client (MCP transport, telemetry, OAuth), honoring `SSL_CERT_FILE`.
 //! - [`man`] — generated `mcp2cli(1)` man page source.
 //!
 //! # Request lifecycle (tldr)
@@ -74,3 +76,4 @@ pub mod observability;
 pub mod output;
 pub mod runtime;
 pub mod telemetry;
+pub mod tls;

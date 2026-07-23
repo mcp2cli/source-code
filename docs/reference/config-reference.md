@@ -26,6 +26,7 @@ server:
   display_name: "My MCP Server"              # Human-readable name for --help banners
   transport: streamable_http                 # streamable_http | stdio
   endpoint: "http://localhost:3001/mcp"      # Required for streamable_http transport
+  protocol_version: auto                     # auto | 2026-07-28 | 2025-11-25
   stdio:
     command: "npx"                           # Subprocess command (required for stdio)
     args:                                    # Subprocess arguments
@@ -118,6 +119,24 @@ Transport protocol. Values:
 |-------|-------------|
 | `streamable_http` | HTTP JSON-RPC with SSE streaming |
 | `stdio` | Stdin/stdout with subprocess |
+
+#### `server.protocol_version`
+
+| Type | Default | Values |
+|------|---------|--------|
+| `string` | `auto` | `auto`, `2026-07-28`, `2025-11-25` |
+
+Which MCP protocol revision to speak:
+
+- `auto` *(default)* — probe with `server/discover` and use the stateless
+  **2026-07-28** revision when the server supports it; fall back to the
+  **2025-11-25** `initialize` handshake otherwise (the spec's
+  backward-compatibility algorithm).
+- `2026-07-28` — modern only. Requests carry per-request `_meta` metadata;
+  never falls back to the handshake (fails fast against legacy servers).
+- `2025-11-25` — legacy only. Skips the probe and goes straight to the
+  `initialize` handshake (saves one round trip on servers you know are
+  legacy).
 
 #### `server.endpoint`
 

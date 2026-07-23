@@ -434,6 +434,8 @@ pub fn supports_root_command(token: &str) -> bool {
     matches!(
         token,
         "tool" | "resource" | "prompt" | "auth" | "jobs" | "doctor" | "inspect" | "ls"
+        // dynamic runtime commands (require a cached discovery inventory)
+        | "ping" | "log" | "complete" | "subscribe" | "unsubscribe" | "get"
         // legacy aliases
         | "discover" | "invoke" | "read" | "list"
     )
@@ -971,11 +973,13 @@ async fn execute_invoke(
         app_id: context.config_name.clone(),
         message: format!("invoking capability {}", capability),
     });
+    let input_schema = context.cached_tool_input_schema(&capability).await;
     let result = context
         .perform(McpOperation::InvokeAction {
             capability,
             arguments,
             background,
+            input_schema,
         })
         .await?;
     command_output_for_action("invoke", result, context).await
@@ -1266,9 +1270,19 @@ async fn execute_doctor(context: &AppContext) -> Result<CommandOutput> {
         .map(|record| record.state.as_str().to_owned())
         .unwrap_or_else(|| "unauthenticated".to_owned());
     let negotiated_summary = negotiated.as_ref().map(|view| {
+        let era = view
+            .protocol_era
+            .as_deref()
+            .map(|era| match era {
+                "modern" => " (stateless)".to_owned(),
+                "legacy" => " (session handshake)".to_owned(),
+                other => format!(" ({})", other),
+            })
+            .unwrap_or_default();
         format!(
-            "protocol {} with {} capability groups cached",
+            "protocol {}{} with {} capability groups cached",
             view.protocol_version,
+            era,
             negotiated_capability_group_count(&view.server_capabilities)
         )
     });
@@ -1356,7 +1370,17 @@ async fn execute_inspect(context: &AppContext) -> Result<CommandOutput> {
     ];
 
     if let Some(view) = &negotiated {
-        lines.push(format!("protocol: {}", view.protocol_version));
+        match view.protocol_era.as_deref() {
+            Some("modern") => lines.push(format!(
+                "protocol: {} (stateless, per-request _meta)",
+                view.protocol_version
+            )),
+            Some("legacy") => lines.push(format!(
+                "protocol: {} (initialize handshake)",
+                view.protocol_version
+            )),
+            _ => lines.push(format!("protocol: {}", view.protocol_version)),
+        }
         let caps = &view.server_capabilities;
         let mut supported = Vec::new();
         if caps.tools.is_some() {
@@ -1846,7 +1870,9 @@ fn read_bearer_token_from_stdin() -> Result<String> {
 fn job_status_from_task_state(status: &TaskState) -> JobStatus {
     match status {
         TaskState::Queued => JobStatus::Queued,
-        TaskState::Running => JobStatus::Running,
+        // A task waiting on client input is still in flight from the
+        // job ledger's perspective; `jobs show/wait` fulfils the input.
+        TaskState::Running | TaskState::InputRequired => JobStatus::Running,
         TaskState::Completed => JobStatus::Completed,
         TaskState::Canceled => JobStatus::Canceled,
         TaskState::Failed => JobStatus::Failed,
@@ -2835,6 +2861,7 @@ mod tests {
             config_name: "work".to_owned(),
             app_id: "bridge".to_owned(),
             protocol_version: "2025-03-26".to_owned(),
+            protocol_era: None,
             session_id: None,
             server_info: Some(PeerInfo {
                 name: "cached-server".to_owned(),

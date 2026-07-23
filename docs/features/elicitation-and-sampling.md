@@ -4,6 +4,30 @@ Handle interactive server-initiated requests — when the MCP server needs human
 
 ---
 
+## How Requests Arrive (per protocol revision)
+
+The wire mechanics depend on the negotiated MCP revision; the terminal
+experience is identical either way:
+
+- **MCP 2025-11-25 (legacy):** the server sends its own JSON-RPC requests
+  (`elicitation/create`, `sampling/createMessage`, `roots/list`) on the
+  active stream and mcp2cli answers inline.
+- **MCP 2026-07-28 (modern):** servers no longer send requests. Instead a
+  `tools/call` / `resources/read` / `prompts/get` may return an interim
+  result with `resultType: "input_required"` whose `inputRequests` map
+  embeds the same request shapes (**Multi Round-Trip Requests**, SEP-2322).
+  mcp2cli prompts you exactly as before, then **retries the original
+  request** with your answers in `inputResponses` — echoing the server's
+  opaque `requestState` verbatim and using a fresh request id, as the spec
+  requires. Up to 8 round trips are resolved per command before mcp2cli
+  gives up.
+
+The same applies to elicitations that arrive *inside a task*: when a
+2026-07-28 task reaches `input_required`, mcp2cli prompts and submits the
+answers via `tasks/update` (see [Background Jobs](background-jobs.md)).
+
+---
+
 ## Elicitation
 
 ### What Is It?
@@ -92,19 +116,24 @@ When the server includes `tools` and `toolChoice` in the sampling request, mcp2c
 
 ## Capability Advertisement
 
-mcp2cli advertises these capabilities during MCP initialization:
+mcp2cli advertises these capabilities during MCP initialization (2025-11-25) or in every request's `_meta["io.modelcontextprotocol/clientCapabilities"]` (2026-07-28):
 
 ```json
 {
   "capabilities": {
     "sampling": {},
-    "elicitation": {},
-    "roots": { "listChanged": true }
+    "elicitation": { "form": {}, "url": {} },
+    "roots": {},
+    "extensions": { "io.modelcontextprotocol/tasks": {} }
   }
 }
 ```
 
-This tells the server it can send elicitation and sampling requests.
+This tells the server it may request elicitation, sampling, and roots input — and, on 2026-07-28 servers, that task-augmented responses are accepted. Per the MRTR rules, a 2026-07-28 server MUST NOT embed an input request the client did not declare support for.
+
+> Note: MCP 2026-07-28 deprecates the Sampling and Roots features
+> (SEP-2577) with a 12-month removal window. mcp2cli continues to answer
+> both for as long as servers use them.
 
 ---
 

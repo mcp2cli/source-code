@@ -53,6 +53,47 @@ events:
         path
     }
 
+    /// Write a stdio config YAML that runs one of the fake Python MCP
+    /// servers from tests/fixtures. `protocol_version` pins the MCP
+    /// revision (`2026-07-28` / `2025-11-25`); `None` leaves the default
+    /// `auto` negotiation in place.
+    pub fn write_fake_stdio_config(
+        &self,
+        name: &str,
+        fixture_script: &str,
+        protocol_version: Option<&str>,
+    ) -> PathBuf {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(fixture_script);
+        let config_dir = self.config_dir().join("configs");
+        std::fs::create_dir_all(&config_dir).expect("config dir should be created");
+        let path = config_dir.join(format!("{}.yaml", name));
+        let pin = protocol_version
+            .map(|version| format!("  protocol_version: '{}'\n", version))
+            .unwrap_or_default();
+        let yaml = format!(
+            r#"schema_version: 1
+app:
+  profile: bridge
+server:
+  display_name: Fake Python Server ({name})
+  transport: stdio
+{pin}  stdio:
+    command: python3
+    args:
+      - '{script}'
+events:
+  enable_stdio_events: false
+"#,
+            name = name,
+            pin = pin,
+            script = script.display(),
+        );
+        std::fs::write(&path, yaml).expect("config should be written");
+        path
+    }
+
     /// Write a demo config YAML that uses the demo.invalid endpoint.
     pub fn write_demo_config(&self, name: &str) -> PathBuf {
         let config_dir = self.config_dir().join("configs");

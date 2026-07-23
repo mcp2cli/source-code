@@ -210,6 +210,7 @@ impl RuntimeHost {
                     let created = write_named_config(
                         &self.layout,
                         &ConfigCreateOptions {
+                            protocol_version: args.protocol_version.clone(),
                             name: args.name,
                             app_profile: args.app,
                             transport: args.transport.into(),

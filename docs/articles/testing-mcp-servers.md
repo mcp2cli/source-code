@@ -46,7 +46,7 @@ mcp2cli --url http://localhost:3001/mcp --json inspect
 ```
 
 Verify:
-- Protocol version matches (2025-11-25)
+- Protocol version matches (2026-07-28 or 2025-11-25, depending on what the server negotiates)
 - Expected capabilities are advertised
 - Server name and version are correct
 

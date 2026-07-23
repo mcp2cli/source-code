@@ -123,7 +123,7 @@ argv
 
 ## MCP Protocol Coverage
 
-Full MCP 2025-11-25 compliance. Key protocol operations in `mcp/client.rs`:
+Full MCP compliance for both the 2026-07-28 (stateless) and 2025-11-25 (initialize handshake) revisions, negotiated automatically via `server/discover`. Key protocol operations in `mcp/client.rs`:
 
 - `initialize` / `initialized` — session negotiation
 - `tools/list`, `resources/list`, `prompts/list` — discovery

@@ -10,7 +10,9 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value, json};
 
-use crate::mcp::protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
+use serde_json::Map;
+
+use crate::mcp::protocol::{JsonRpcError, JsonRpcId, JsonRpcRequest, JsonRpcResponse};
 use crate::runtime::{EventBroker, RuntimeEvent};
 
 // ---------------------------------------------------------------------------
@@ -112,7 +114,19 @@ impl ServerMessageHandler for OperationMessageHandler {
                     message: format!("server cancelled request {}: {}", request_id, reason),
                 });
             }
-            "notifications/tasks/status" => self.handle_task_status(params),
+            "notifications/tasks/status" | "notifications/tasks" => self.handle_task_status(params),
+            "notifications/subscriptions/acknowledged" => {
+                // MCP 2026-07-28: first message on a subscriptions/listen
+                // stream, reflecting the filter the server agreed to honor.
+                let honored = params
+                    .and_then(|p| p.get("notifications"))
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "{}".to_owned());
+                self.events.emit(RuntimeEvent::Info {
+                    app_id: self.app_id.clone(),
+                    message: format!("server acknowledged subscription filter: {}", honored),
+                });
+            }
             _ => {
                 tracing::debug!("ignoring unknown server notification: {}", method);
             }
@@ -243,6 +257,47 @@ impl OperationMessageHandler {
             app_id: self.app_id.clone(),
             message: format!("task {} status: {} {}", task_id, status, message),
         });
+    }
+
+    /// Fulfil an MRTR `inputRequests` map (MCP 2026-07-28, SEP-2322).
+    ///
+    /// Each entry embeds a server request (`elicitation/create`,
+    /// `sampling/createMessage`, or `roots/list`) that is dispatched through
+    /// the same handlers used for legacy server-initiated requests. The
+    /// collected results form the `inputResponses` map the client sends on
+    /// the retry of the original request. An entry that cannot be fulfilled
+    /// (unknown method, declined sampling, I/O failure) aborts the whole
+    /// round trip — the retry would be rejected by the server anyway.
+    pub fn fulfill_input_requests(
+        &self,
+        input_requests: &Map<String, Value>,
+    ) -> Result<Map<String, Value>> {
+        let mut responses = Map::new();
+        for (key, embedded) in input_requests {
+            let method = embedded
+                .get("method")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("input request '{}' is missing a method", key))?;
+            let request = JsonRpcRequest::new(
+                JsonRpcId::String(format!("mrtr-{}", key)),
+                method,
+                embedded.get("params").cloned(),
+            );
+            let response = self.handle_request(&request)?;
+            if let Some(error) = response.error {
+                return Err(anyhow!(
+                    "input request '{}' ({}) was not fulfilled: {}",
+                    key,
+                    method,
+                    error.message
+                ));
+            }
+            let result = response
+                .result
+                .ok_or_else(|| anyhow!("input request '{}' produced no result", key))?;
+            responses.insert(key.clone(), result);
+        }
+        Ok(responses)
     }
 
     /// Handle `roots/list` server→client request.

@@ -373,6 +373,7 @@ impl TelemetryRecorder {
                 .timeout_connect(Duration::from_secs(2))
                 .timeout(Duration::from_secs(5))
                 .user_agent(&user_agent)
+                .tls_config(std::sync::Arc::new(crate::tls::client_config()))
                 .build();
             let response = agent
                 .post(&endpoint)

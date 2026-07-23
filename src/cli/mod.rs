@@ -123,6 +123,9 @@ pub struct ConfigInitArgs {
     pub stdio_command: Option<String>,
     #[arg(long = "stdio-arg")]
     pub stdio_args: Vec<String>,
+    /// MCP protocol version: auto (default), 2026-07-28, or 2025-11-25.
+    #[arg(long = "protocol-version")]
+    pub protocol_version: Option<String>,
     #[arg(long)]
     pub force: bool,
 }

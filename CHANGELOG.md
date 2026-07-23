@@ -1,3 +1,13 @@
+## 0.1.6 (2026-07-09)
+
+### Features
+
+- **mcp:** support MCP 2026-07-28 alongside 2025-11-25 with auto negotiation
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.5 (2026-06-10)
 
 ### Fixes

@@ -1001,11 +1001,13 @@ async fn execute_manifest_command(
                 app_id: context.config_name.clone(),
                 message: format!("executing tool '{}'", cmd.origin_name),
             });
+            let input_schema = context.cached_tool_input_schema(&cmd.origin_name).await;
             let result = context
                 .perform(McpOperation::InvokeAction {
                     capability: cmd.origin_name.clone(),
                     arguments,
                     background,
+                    input_schema,
                 })
                 .await?;
             format_action_result(&cmd.origin_name, result, context).await
@@ -1255,13 +1257,23 @@ async fn execute_log(level: &str, context: &AppContext) -> Result<CommandOutput>
         })
         .await?;
     match result {
-        McpOperationResult::LoggingLevelSet { message, level } => Ok(CommandOutput::new(
-            &context.config_name,
-            "log",
-            message,
-            vec![format!("level: {}", level)],
-            json!({ "level": level }),
-        )),
+        McpOperationResult::LoggingLevelSet { message, level } => {
+            // Persist the level so MCP 2026-07-28 clients (where
+            // logging/setLevel no longer exists) can inject it on every
+            // request via _meta[io.modelcontextprotocol/logLevel].
+            context
+                .services
+                .state_store
+                .set_server_log_level(&context.config_name, &level)
+                .await?;
+            Ok(CommandOutput::new(
+                &context.config_name,
+                "log",
+                message,
+                vec![format!("level: {}", level)],
+                json!({ "level": level }),
+            ))
+        }
         other => Err(anyhow!(
             "unexpected response for logging/setLevel: {}",
             serde_json::to_string(&other)?
