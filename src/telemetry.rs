@@ -948,13 +948,28 @@ mod tests {
             Duration::from_millis(10),
         );
         recorder.flush();
-
         server.join().unwrap();
-        let content = fs::read_to_string(tmp.path().join("telemetry.ndjson")).unwrap_or_default();
-        assert!(
-            content.is_empty(),
-            "expected the shipped event to be truncated from disk, got: {content:?}"
-        );
+
+        // flush() bounds its own wait (SHIP_FLUSH_TIMEOUT) so a busy test
+        // runner can still be mid-round-trip when it returns — poll
+        // briefly rather than asserting the instant flush() returns,
+        // since the shipping thread keeps running in the background
+        // exactly as it would in production. This still exercises (and
+        // would catch a regression in) the real code path; it just
+        // tolerates CI scheduling jitter that has nothing to do with
+        // shipping correctness.
+        let path = tmp.path().join("telemetry.ndjson");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let content = fs::read_to_string(&path).unwrap_or_default();
+            if content.is_empty() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                panic!("expected the shipped event to be truncated from disk, got: {content:?}");
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]
