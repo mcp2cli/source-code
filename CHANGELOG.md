@@ -1,3 +1,13 @@
+## 0.1.7 (2026-07-23)
+
+### Features
+
+- **tls:** trust SSL_CERT_FILE custom CA certificates
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.6 (2026-07-09)
 
 ### Features
