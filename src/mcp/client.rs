@@ -861,10 +861,12 @@ impl StreamableHttpMcpClient {
             )
         })?;
         // Accept both plain http (local/dev servers) and https (anything real,
-        // and required whenever a bearer token is sent). Roots come from the
-        // bundled webpki set so the binary needs no system trust store.
+        // and required whenever a bearer token is sent). Trust starts from the
+        // bundled webpki roots and layers in SSL_CERT_FILE when set (see
+        // crate::tls), so the binary needs no system trust store by default
+        // but still works behind a corporate TLS-inspection proxy.
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_webpki_roots()
+            .with_tls_config(crate::tls::client_config())
             .https_or_http()
             .enable_http1()
             .build();

@@ -101,6 +101,34 @@ npx @modelcontextprotocol/server-everything streamableHttp
 # Listening on http://127.0.0.1:3001/mcp
 ```
 
+### Custom CA certificates (`SSL_CERT_FILE`)
+
+By default, HTTPS connections trust the bundled Mozilla root set
+(`webpki-roots`) — no system trust store is needed. In corporate
+environments that run a TLS-inspection proxy (mitmproxy, ZScaler,
+Cloudflare WARP, Fortinet, …), outbound HTTPS traffic is re-signed with a
+private root CA that isn't in that bundle, and connections fail with:
+
+```text
+Error: streamable HTTP request failed: client error (Connect)
+```
+
+Set `SSL_CERT_FILE` to a PEM file containing the extra CA certificate(s)
+to trust — the same convention curl, Python `requests`, Go's `net/http`,
+and Ruby's OpenSSL bindings use:
+
+```bash
+export SSL_CERT_FILE=/opt/corp/mitmproxy-ca-cert.pem
+email ls
+```
+
+The bundled roots are never removed — `SSL_CERT_FILE` only adds to the
+trust store, and unsetting it restores the default behavior exactly. This
+applies to every outbound HTTPS connection mcp2cli makes: the MCP
+transport, telemetry shipping, and OAuth login. An unset or unreadable
+`SSL_CERT_FILE` degrades to the bundled roots with a warning rather than
+failing outright.
+
 ---
 
 ## Stdio

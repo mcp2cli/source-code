@@ -398,6 +398,7 @@ email send --args-file base.json --args-json '{"subject": "Hi"}' --to final@exam
 | `MCP2CLI_SERVER__TRANSPORT` | Override transport type |
 | `MCP2CLI_DEFAULTS__OUTPUT` | Override default output format |
 | `MCP2CLI_DEFAULTS__TIMEOUT_SECONDS` | Override default timeout |
+| `SSL_CERT_FILE` | Extra CA certificate(s) (PEM) to trust for every outbound HTTPS connection — MCP transport, telemetry, and OAuth — on top of the bundled roots. Same convention as curl/Python/Go. See [Transports](../features/transports.md#custom-ca-certificates-ssl_cert_file). |
 
 Pattern: `MCP2CLI_` prefix + config path with `__` as separator.
 
