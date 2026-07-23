@@ -800,6 +800,7 @@ fn config_equals_form_works() {
     let mut cmd = assert_cmd::Command::cargo_bin("mcp2cli").expect("binary should be built");
     cmd.env("MCP2CLI_CONFIG_DIR", fixture.config_dir());
     cmd.env("MCP2CLI_DATA_DIR", fixture.data_dir());
+    cmd.env("MCP2CLI_TELEMETRY", "off");
     cmd.arg("equalsform");
     cmd.arg(format!("--config={}", config_path.display()));
     cmd.arg("discover");

@@ -21,6 +21,8 @@ fn spawn_as(argv0: &str, args: &[&str], envs: &[(&str, &std::path::Path)]) -> st
     for (k, v) in envs {
         cmd.env(k, v);
     }
+    // Never make real network calls to production telemetry infra in tests.
+    cmd.env("MCP2CLI_TELEMETRY", "off");
     cmd.output().expect("spawn mcp2cli")
 }
 

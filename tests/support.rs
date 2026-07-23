@@ -123,6 +123,12 @@ pub fn mcp2cli_cmd(fixture: &TestFixture) -> assert_cmd::Command {
     let mut cmd = assert_cmd::Command::cargo_bin("mcp2cli").expect("binary should be built");
     cmd.env("MCP2CLI_CONFIG_DIR", fixture.config_dir());
     cmd.env("MCP2CLI_DATA_DIR", fixture.data_dir());
+    // Integration tests must never make real network calls to production
+    // telemetry infrastructure — the endpoint is now genuinely live and
+    // reachable, so without this every test invocation would attempt a
+    // real HTTP round trip, adding latency and flakiness unrelated to
+    // what the test is actually verifying.
+    cmd.env("MCP2CLI_TELEMETRY", "off");
     cmd
 }
 
@@ -137,6 +143,7 @@ pub fn mcp2cli_with_config(
     let mut cmd = assert_cmd::Command::cargo_bin("mcp2cli").expect("binary should be built");
     cmd.env("MCP2CLI_CONFIG_DIR", fixture.config_dir());
     cmd.env("MCP2CLI_DATA_DIR", fixture.data_dir());
+    cmd.env("MCP2CLI_TELEMETRY", "off");
     cmd.arg(config_name);
     cmd.arg("--config");
     cmd.arg(config_path);
