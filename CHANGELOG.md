@@ -1,3 +1,13 @@
+## 0.1.9 (2026-09-20)
+
+### Fixes
+
+- **cli:** accept required fields from every argument form on mapped tools
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.8 (2026-07-23)
 
 ### Features
