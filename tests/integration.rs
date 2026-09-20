@@ -976,3 +976,57 @@ fn config_list_shows_created_configs() {
         .stdout(predicate::str::contains("listed1"))
         .stdout(predicate::str::contains("listed2"));
 }
+
+// ---------------------------------------------------------------------------
+// Dynamic surface: mapped tool arguments
+// ---------------------------------------------------------------------------
+
+/// Write a demo-backed config and cache its inventory so mapped tool
+/// subcommands (`tools.echo`, …) are available on the dynamic surface.
+fn demo_config_with_inventory(fixture: &TestFixture, name: &str) {
+    fixture.write_demo_config(name);
+    mcp2cli_cmd(fixture)
+        .arg(name)
+        .arg("tool")
+        .arg("list")
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+}
+
+#[test]
+fn mapped_tool_accepts_required_field_from_args_json() {
+    let fixture = TestFixture::new();
+    demo_config_with_inventory(&fixture, "email");
+
+    mcp2cli_cmd(&fixture)
+        .arg("email")
+        .arg("--json")
+        .arg("tools.echo")
+        .arg("--args-json")
+        .arg(r#"{"message":"hi"}"#)
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""message": "hi""#));
+}
+
+#[test]
+fn mapped_tool_missing_required_field_is_not_an_unrecognized_subcommand() {
+    let fixture = TestFixture::new();
+    demo_config_with_inventory(&fixture, "email");
+
+    mcp2cli_cmd(&fixture)
+        .arg("email")
+        .arg("tools.echo")
+        .arg("--args-json")
+        .arg("{}")
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "the following required arguments were not provided",
+        ))
+        .stderr(predicate::str::contains("--message <TEXT>"))
+        .stderr(predicate::str::contains("unrecognized subcommand").not());
+}

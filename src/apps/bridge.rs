@@ -469,6 +469,20 @@ fn parse_bridge_cli(
     BridgeCli::from_arg_matches(&matches)
 }
 
+/// Whether the subcommand `argv` targets is one the static bridge parser
+/// defines, regardless of whether its arguments would parse.
+fn static_bridge_defines_command(argv: &[OsString], invoked_as: &str) -> bool {
+    match bridge_command(invoked_as)
+        .ignore_errors(true)
+        .try_get_matches_from(argv.to_vec())
+    {
+        Ok(matches) => matches.subcommand_name().is_some(),
+        // Only help/version requests escape `ignore_errors`; the static bridge
+        // renders those itself.
+        Err(_) => true,
+    }
+}
+
 fn version_report(output_format: OutputFormat, context: &AppContext) -> ExecutionReport {
     ExecutionReport {
         output_format,
@@ -621,7 +635,7 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
                 // lacks dynamic-only commands like `ls`/`ping`/`log`/`complete`/
                 // `subscribe`) would otherwise print a misleading
                 // "unrecognized subcommand" error for those.
-                match err.downcast::<clap::Error>() {
+                let err = match err.downcast::<clap::Error>() {
                     Ok(clap_error)
                         if matches!(
                             clap_error.kind(),
@@ -632,8 +646,16 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
                     {
                         return Ok(help_report(output_format, &context, clap_error));
                     }
-                    // Any other parse failure falls through to the static bridge.
-                    _ => {}
+                    Ok(clap_error) => anyhow::Error::from(clap_error),
+                    Err(err) => err,
+                };
+                // For the same reason, any other parse failure is reported as-is
+                // unless the static bridge defines the targeted command (`tool`,
+                // `invoke`, `jobs`, …) and may accept what the dynamic surface
+                // rejected. A mapped tool with a missing argument must not come
+                // back as "unrecognized subcommand".
+                if !static_bridge_defines_command(argv, &context.invoked_as) {
+                    return Err(err);
                 }
             }
         }
@@ -2921,6 +2943,30 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn static_bridge_defines_only_its_own_commands() {
+        let defines = |args: &[&str]| {
+            let argv = args.iter().map(OsString::from).collect::<Vec<_>>();
+            static_bridge_defines_command(&argv, "email")
+        };
+
+        assert!(defines(&["email", "tool", "call"]));
+        assert!(defines(&["email", "invoke", "--help"]));
+        assert!(defines(&["email", "jobs", "show", "--command", "send"]));
+        assert!(defines(&[
+            "email",
+            "--config",
+            "email.yaml",
+            "discover",
+            "capabilities"
+        ]));
+        // Mapped tools, dynamic-only runtime commands, and typos belong to the
+        // dynamic surface, whose parse error must be reported as-is.
+        assert!(!defines(&["email", "echo", "--args-json", "{}"]));
+        assert!(!defines(&["email", "ls", "--tools"]));
+        assert!(!defines(&["email", "ecoh"]));
     }
 
     #[test]

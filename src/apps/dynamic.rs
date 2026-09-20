@@ -7,7 +7,11 @@
 use std::ffi::OsString;
 
 use anyhow::{Result, anyhow};
-use clap::Arg;
+use clap::{
+    Arg,
+    error::{ContextKind, ContextValue, ErrorKind},
+    parser::ValueSource,
+};
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -362,11 +366,15 @@ pub fn build_dynamic_cli(
 fn build_leaf_command(name: &str, cmd: &ManifestCommand) -> clap::Command {
     let mut sub = clap::Command::new(name.to_owned()).about(cmd.summary.clone());
 
+    // Schema-required fields are deliberately not clap-required: they may also
+    // arrive through --args-json/--args-file/--arg/--arg-json, which clap can't
+    // see into. `ensure_required_arguments` enforces them after the merge.
+
     // Add positional argument if specified
     if let Some(pos) = &cmd.positional {
-        let mut arg = Arg::new(&pos.name).required(pos.required);
-        if let Some(help) = &pos.help {
-            arg = arg.help(help.clone());
+        let mut arg = Arg::new(&pos.name);
+        if let Some(help) = field_help(pos.help.as_deref(), pos.required) {
+            arg = arg.help(help);
         }
         sub = sub.arg(arg);
     }
@@ -430,9 +438,6 @@ fn build_leaf_command(name: &str, cmd: &ManifestCommand) -> clap::Command {
 /// Build a single clap Arg from a FlagSpec.
 fn build_flag_arg(name: &str, spec: &FlagSpec) -> Arg {
     let mut arg = Arg::new(name.to_owned()).long(name.to_owned());
-    if spec.required {
-        arg = arg.required(true);
-    }
 
     if spec.flag_type == FlagType::Boolean {
         arg = arg.action(clap::ArgAction::SetTrue);
@@ -443,8 +448,8 @@ fn build_flag_arg(name: &str, spec: &FlagSpec) -> Arg {
         }
     }
 
-    if let Some(help) = &spec.help {
-        arg = arg.help(help.to_owned());
+    if let Some(help) = field_help(spec.help.as_deref(), spec.required) {
+        arg = arg.help(help);
     }
 
     if let Some(default) = &spec.default {
@@ -460,6 +465,16 @@ fn build_flag_arg(name: &str, spec: &FlagSpec) -> Arg {
     }
 
     arg
+}
+
+/// Help text for a schema field. Required fields are marked explicitly because
+/// they are not clap-required, so the usage line no longer lists them.
+fn field_help(help: Option<&str>, required: bool) -> Option<String> {
+    match (help, required) {
+        (Some(help), true) => Some(format!("{help} [required]")),
+        (None, true) => Some("[required]".to_owned()),
+        (help, false) => help.map(ToOwned::to_owned),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -554,8 +569,8 @@ pub fn parse_dynamic(
     manifest: &CommandManifest,
     server_display: &str,
 ) -> Result<DynamicParseResult> {
-    let app = build_dynamic_cli(invoked_as, manifest, server_display);
-    let matches = app.try_get_matches_from(argv.to_vec()).map_err(|e| {
+    let mut app = build_dynamic_cli(invoked_as, manifest, server_display);
+    let matches = app.try_get_matches_from_mut(argv.to_vec()).map_err(|e| {
         if matches!(
             e.kind(),
             clap::error::ErrorKind::DisplayHelp
@@ -704,7 +719,7 @@ pub fn parse_dynamic(
         }
 
         // Manifest-derived commands
-        _ => resolve_manifest_command(sub_name, sub_matches, manifest)?,
+        _ => resolve_manifest_command(sub_name, sub_matches, manifest, &mut app)?,
     };
 
     Ok(DynamicParseResult {
@@ -729,42 +744,24 @@ fn extract_attempted_subcommand(err_msg: &str) -> Option<String> {
     None
 }
 
-/// Resolve a subcommand match against the manifest.
+/// Resolve a subcommand match against the manifest. `cli` is the dynamic CLI
+/// that produced `matches`; it supplies usage text for argument errors.
 fn resolve_manifest_command(
     name: &str,
     matches: &clap::ArgMatches,
     manifest: &CommandManifest,
+    cli: &mut clap::Command,
 ) -> Result<DynamicCommand> {
     let entry = manifest
         .commands
         .get(name)
         .ok_or_else(|| anyhow!("unknown command: {}", name))?;
+    let leaf_cli = cli
+        .find_subcommand_mut(name)
+        .ok_or_else(|| anyhow!("unknown command: {}", name))?;
 
     match entry {
-        ManifestEntry::Command(cmd) => {
-            // Special case: "get" command → ResourceGet
-            if cmd.kind == CommandKind::Resource && cmd.origin_name == "get" {
-                let uri = matches
-                    .get_one::<String>("uri")
-                    .ok_or_else(|| anyhow!("get requires a URI argument"))?
-                    .clone();
-                return Ok(DynamicCommand::ResourceGet { uri });
-            }
-
-            let arguments = extract_arguments_from_matches(matches, cmd)?;
-            let background = matches
-                .try_get_one::<bool>("background")
-                .ok()
-                .flatten()
-                .copied()
-                .unwrap_or(false);
-
-            Ok(DynamicCommand::Manifest {
-                cmd: cmd.clone(),
-                arguments,
-                background,
-            })
-        }
+        ManifestEntry::Command(cmd) => resolve_leaf_command(cmd, matches, leaf_cli),
         ManifestEntry::Group { children, .. } => {
             let (child_name, child_matches) = matches
                 .subcommand()
@@ -772,22 +769,112 @@ fn resolve_manifest_command(
             let child_cmd = children
                 .get(child_name)
                 .ok_or_else(|| anyhow!("unknown subcommand: {} {}", name, child_name))?;
+            let child_cli = leaf_cli
+                .find_subcommand_mut(child_name)
+                .ok_or_else(|| anyhow!("unknown subcommand: {} {}", name, child_name))?;
 
-            let arguments = extract_arguments_from_matches(child_matches, child_cmd)?;
-            let background = child_matches
-                .try_get_one::<bool>("background")
-                .ok()
-                .flatten()
-                .copied()
-                .unwrap_or(false);
-
-            Ok(DynamicCommand::Manifest {
-                cmd: child_cmd.clone(),
-                arguments,
-                background,
-            })
+            resolve_leaf_command(child_cmd, child_matches, child_cli)
         }
     }
+}
+
+/// Build the dispatchable command for a single manifest leaf.
+fn resolve_leaf_command(
+    cmd: &ManifestCommand,
+    matches: &clap::ArgMatches,
+    cli: &mut clap::Command,
+) -> Result<DynamicCommand> {
+    let arguments = extract_arguments_from_matches(matches, cmd)?;
+    ensure_required_arguments(&arguments, cmd, cli)?;
+
+    // Special case: "get" command → ResourceGet
+    if cmd.kind == CommandKind::Resource && cmd.origin_name == "get" {
+        let uri = arguments
+            .get("uri")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("get requires a URI argument"))?
+            .to_owned();
+        return Ok(DynamicCommand::ResourceGet { uri });
+    }
+
+    let background = matches
+        .try_get_one::<bool>("background")
+        .ok()
+        .flatten()
+        .copied()
+        .unwrap_or(false);
+
+    Ok(DynamicCommand::Manifest {
+        cmd: cmd.clone(),
+        arguments,
+        background,
+    })
+}
+
+/// Enforce the schema's required fields against the fully merged arguments,
+/// so a field satisfies the requirement whether it came from its typed flag or
+/// positional, or from --args-json, --args-file, --arg or --arg-json. The error
+/// mirrors clap's own missing-argument report for the subcommand.
+fn ensure_required_arguments(
+    arguments: &Value,
+    cmd: &ManifestCommand,
+    cli: &mut clap::Command,
+) -> Result<()> {
+    let mut missing = Vec::new();
+    let mut missing_keys = Vec::new();
+
+    if let Some(pos) = &cmd.positional
+        && pos.required
+        && arguments.get(pos.name.as_str()).is_none()
+    {
+        missing.push(format!("<{}>", pos.name));
+        missing_keys.push(pos.name.as_str());
+    }
+
+    for (flag_name, spec) in &cmd.flags {
+        let covered_by_positional = cmd
+            .positional
+            .as_ref()
+            .is_some_and(|p| p.name == *flag_name);
+        if !spec.required
+            || covered_by_positional
+            || arguments.get(spec.original_name.as_str()).is_some()
+        {
+            continue;
+        }
+        missing.push(match spec.flag_type.value_name() {
+            "" => format!("--{}", flag_name),
+            value_name => format!("--{} <{}>", flag_name, value_name),
+        });
+        missing_keys.push(spec.original_name.as_str());
+    }
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let keys = missing_keys
+        .iter()
+        .map(|key| format!("'{}'", key))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut error = clap::Error::new(ErrorKind::MissingRequiredArgument).with_cmd(cli);
+    error.insert(ContextKind::InvalidArg, ContextValue::Strings(missing));
+    error.insert(
+        ContextKind::Suggested,
+        ContextValue::StyledStrs(vec![
+            format!(
+                "or set {} with --args-json, --args-file, or --arg-json",
+                keys
+            )
+            .into(),
+        ]),
+    );
+    error.insert(
+        ContextKind::Usage,
+        ContextValue::StyledStr(cli.render_usage()),
+    );
+    Err(error.into())
 }
 
 /// Extract arguments from clap matches into a JSON object, using the manifest
@@ -845,6 +932,13 @@ fn extract_arguments_from_matches(
         // kebab-cased CLI flag (`max-tokens`), so servers receive the keys they
         // declared in their input schema.
         let original_name = spec.original_name.clone();
+        // A schema default only fills a gap; it must not overwrite a value
+        // supplied through --args-file or --args-json.
+        if matches.value_source(flag_name) == Some(ValueSource::DefaultValue)
+            && object.contains_key(&original_name)
+        {
+            continue;
+        }
         match spec.flag_type {
             FlagType::Boolean => {
                 if matches.get_flag(flag_name) {
@@ -2103,6 +2197,153 @@ mod tests {
         )
         .expect("jobs list should parse");
         assert!(matches!(result.command, DynamicCommand::JobsList));
+    }
+
+    fn argv(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
+
+    fn parse_manifest_arguments(manifest: &CommandManifest, args: &[&str]) -> Value {
+        match parse_dynamic(&argv(args), "email", manifest, "Test Server") {
+            Ok(DynamicParseResult {
+                command: DynamicCommand::Manifest { arguments, .. },
+                ..
+            }) => arguments,
+            Ok(result) => panic!("{:?} parsed as {:?}", args, result.command),
+            Err(err) => panic!("{:?} should parse: {}", args, err),
+        }
+    }
+
+    #[test]
+    fn required_flag_is_satisfied_by_every_argument_form() {
+        // Regression (#8): clap enforced schema-required fields before the
+        // whole-object forms were merged, so `echo --args-json '{"message":…}'`
+        // was rejected even though `echo --message …` worked.
+        let manifest = test_manifest();
+        let args_file = tempfile::NamedTempFile::new().expect("temp file should be created");
+        std::fs::write(args_file.path(), r#"{"message":"hi"}"#)
+            .expect("args file should be written");
+        let args_file_path = args_file
+            .path()
+            .to_str()
+            .expect("temp path should be UTF-8");
+
+        for form in [
+            ["--message", "hi"],
+            ["--args-json", r#"{"message":"hi"}"#],
+            ["--args-file", args_file_path],
+            ["--arg-json", r#"message="hi""#],
+            ["--arg", "message=hi"],
+        ] {
+            let arguments =
+                parse_manifest_arguments(&manifest, &["email", "echo", form[0], form[1]]);
+            assert_eq!(arguments, json!({"message": "hi"}), "form {:?}", form);
+        }
+    }
+
+    #[test]
+    fn missing_required_argument_is_a_clap_error_for_the_subcommand() {
+        let manifest = test_manifest();
+        for (args, missing) in [
+            (
+                &["email", "echo", "--args-json", r#"{"mesage":"hi"}"#][..],
+                "--message <TEXT>",
+            ),
+            (&["email", "get"][..], "<uri>"),
+        ] {
+            let err = match parse_dynamic(&argv(args), "email", &manifest, "Test Server") {
+                Ok(_) => panic!("{:?} should fail without its required argument", args),
+                Err(err) => err,
+            };
+            let clap_err = err
+                .downcast::<clap::Error>()
+                .expect("missing argument should stay a typed clap error");
+            assert_eq!(clap_err.kind(), ErrorKind::MissingRequiredArgument);
+            let rendered = clap_err.to_string();
+            assert!(rendered.contains(missing), "{}", rendered);
+            assert!(
+                rendered.contains(&format!("Usage: email {} ", args[1])),
+                "{}",
+                rendered
+            );
+        }
+    }
+
+    #[test]
+    fn resource_get_reads_uri_from_merged_arguments() {
+        let manifest = test_manifest();
+        for args in [
+            &["email", "get", "demo://resource/readme.md"][..],
+            &[
+                "email",
+                "get",
+                "--args-json",
+                r#"{"uri":"demo://resource/readme.md"}"#,
+            ][..],
+        ] {
+            let result = match parse_dynamic(&argv(args), "email", &manifest, "Test Server") {
+                Ok(result) => result,
+                Err(err) => panic!("{:?} should parse: {}", args, err),
+            };
+            assert!(
+                matches!(&result.command, DynamicCommand::ResourceGet { uri } if uri == "demo://resource/readme.md"),
+                "{:?}",
+                result.command
+            );
+        }
+    }
+
+    #[test]
+    fn schema_default_fills_gaps_without_overriding_supplied_values() {
+        use crate::apps::manifest::*;
+        use indexmap::IndexMap;
+
+        let mut commands = IndexMap::new();
+        commands.insert(
+            "search".to_owned(),
+            ManifestEntry::Command(ManifestCommand {
+                kind: CommandKind::Tool,
+                origin_name: "search".to_owned(),
+                summary: "Search messages".to_owned(),
+                flags: IndexMap::from([(
+                    "limit".to_owned(),
+                    FlagSpec {
+                        original_name: "limit".to_owned(),
+                        flag_type: FlagType::Integer,
+                        required: false,
+                        default: Some(json!(10)),
+                        help: None,
+                        enum_values: None,
+                    },
+                )]),
+                positional: None,
+                supports_background: false,
+            }),
+        );
+        let manifest = CommandManifest {
+            commands,
+            server_name: Some("Test Server".to_owned()),
+        };
+
+        let arguments = parse_manifest_arguments(&manifest, &["email", "search"]);
+        assert_eq!(arguments["limit"], json!(10));
+        let arguments = parse_manifest_arguments(
+            &manifest,
+            &["email", "search", "--args-json", r#"{"limit":50}"#],
+        );
+        assert_eq!(arguments["limit"], json!(50));
+        let arguments = parse_manifest_arguments(
+            &manifest,
+            &[
+                "email",
+                "search",
+                "--args-json",
+                r#"{"limit":50}"#,
+                "--limit",
+                "5",
+            ],
+        );
+        assert_eq!(arguments["limit"], json!(5));
     }
 
     #[test]
