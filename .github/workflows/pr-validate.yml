@@ -4,8 +4,14 @@ on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
 
+# A reusable workflow cannot be granted more than its caller has, and the
+# called job declares exactly these two: it reads the PR title and reports the
+# result as a commit status. Without `statuses: write` the run is rejected at
+# startup ("requesting 'statuses: write', but is only allowed 'statuses: none'")
+# — silently, since an invalid workflow produces no check on the PR.
 permissions:
   pull-requests: read
+  statuses: write
 
 jobs:
   pr-title:
