@@ -73,3 +73,23 @@ telemetry:
 #     echo:
 #       message: msg
 #   resource_verb: get                    # Verb for resource reads (get|fetch|read)
+# ── Discovery ──────────────────────────────────────────────────────────
+# Where the dynamic CLI gets its command list.
+#
+# discovery:
+#   auto: true                            # Discover on demand when nothing is cached
+#   snapshot: inventory.json              # Bundled command list, relative to this file
+#   ttl_seconds: 86400                    # Re-discover when the list is older than this
+
+# ── Branding ───────────────────────────────────────────────────────────
+# Publish this config as a CLI under its own name. Presence of this section
+# switches to embedded mode: own help header and version, only the listed
+# built-in commands, own data directory, mcp2cli telemetry off.
+# `mcp2cli package init` writes this for you. See docs/features/branded-cli.md
+#
+# branding:
+#   name: email                           # Product name (data dir, OAuth client name)
+#   about: Send mail from your terminal   # Help header
+#   version: 1.4.0                        # What --version prints
+#   builtin_commands: [auth]              # Omit = all, [] = none
+#   after_help: "Docs: https://example.com"

@@ -519,6 +519,16 @@ impl ProtocolEngine {
         self
     }
 
+    /// Identify as a different client than mcp2cli — a CLI published on top of
+    /// it introduces itself to servers under its own name and version.
+    pub fn with_client_info(mut self, name: impl Into<String>, version: impl Into<String>) -> Self {
+        self.client_info = PeerInfo {
+            name: name.into(),
+            version: version.into(),
+        };
+        self
+    }
+
     pub fn with_log_level(mut self, log_level: Option<String>) -> Self {
         self.log_level = log_level;
         self
@@ -1325,6 +1335,14 @@ mod tests {
             meta[META_CLIENT_CAPABILITIES]["extensions"][TASKS_EXTENSION_ID].is_object(),
             "tasks extension should be advertised"
         );
+    }
+
+    #[test]
+    fn a_published_cli_introduces_itself_under_its_own_name() {
+        let engine = ProtocolEngine::new(DEFAULT_MCP_PROTOCOL_VERSION, "mcp2cli", "0.1.0")
+            .with_client_info("acme-mail", "1.4.0");
+        assert_eq!(engine.client_info.name, "acme-mail");
+        assert_eq!(engine.client_info.version, "1.4.0");
     }
 
     #[test]

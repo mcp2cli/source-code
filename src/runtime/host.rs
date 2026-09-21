@@ -48,9 +48,10 @@ use clap::error::ErrorKind;
 use crate::{
     apps::{AppContext, bridge, manifest::CommandManifest},
     cli::{
-        ConfigCommand, DaemonCommand, HostCommand, LinkCommand, ManCommand, UseArgs,
-        config_show_output, configs_list_output, link_create_output, man_install_output,
-        parse_host_cli, use_clear_output, use_config_output, use_status_output,
+        ConfigCommand, DaemonCommand, HostCommand, LinkCommand, ManCommand, PackageCommand,
+        PackageSourceArgs, UseArgs, config_show_output, configs_list_output, link_create_output,
+        man_install_output, package_init_output, package_snapshot_output, parse_host_cli,
+        use_clear_output, use_config_output, use_status_output,
     },
     config::{
         ConfigCreateOptions, ResolvedAppConfig, RuntimeLayout, active_config_load_status,
@@ -298,8 +299,79 @@ impl RuntimeHost {
             HostCommand::Daemon(args) => {
                 return self.handle_daemon(args, output_format).await;
             }
+            HostCommand::Package(args) => match args.command {
+                PackageCommand::Init(args) => {
+                    let source = self.load_package_source(&args.source, Some(&args.name))?;
+                    // A snapshot is what makes the packaged CLI work on first run,
+                    // but a server that is down today must not block scaffolding.
+                    let (snapshot, snapshot_warning) = if args.no_snapshot {
+                        (None, None)
+                    } else {
+                        match crate::package::capture_snapshot(&self.layout, &source).await {
+                            Ok(snapshot) => (Some(snapshot), None),
+                            Err(error) => (None, Some(format!("{:#}", error))),
+                        }
+                    };
+                    let target = args.target.into();
+                    let options = crate::package::PackageInitOptions {
+                        out_dir: args
+                            .out
+                            .unwrap_or_else(|| PathBuf::from(format!("{}-cli", args.name))),
+                        name: args.name,
+                        package_name: args.package_name,
+                        version: args.package_version,
+                        about: args.about,
+                        builtin_commands: if args.no_builtins {
+                            Some(Vec::new())
+                        } else if args.builtin.is_empty() {
+                            None
+                        } else {
+                            Some(args.builtin)
+                        },
+                        target,
+                        force: args.force,
+                    };
+                    let report =
+                        crate::package::init_package(&options, &source, snapshot.as_ref())?;
+                    package_init_output(
+                        &options.name,
+                        target,
+                        &report,
+                        snapshot.as_ref().map(|snapshot| snapshot.item_count()),
+                        snapshot_warning.as_deref(),
+                    )
+                }
+                PackageCommand::Snapshot(args) => {
+                    let source = self.load_package_source(&args.source, None)?;
+                    let snapshot = crate::package::capture_snapshot(&self.layout, &source).await?;
+                    snapshot.write(&args.out)?;
+                    package_snapshot_output(&args.out, &snapshot)
+                }
+            },
         };
         render(output_format, &output, &[])
+    }
+
+    /// The config a `package` command works from: `--config <file>`, else the
+    /// named config `--from`, else the one named like the CLI being packaged.
+    fn load_package_source(
+        &self,
+        source: &PackageSourceArgs,
+        default_name: Option<&str>,
+    ) -> Result<ResolvedAppConfig> {
+        if let Some(path) = &source.config {
+            let name = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| anyhow!("cannot derive a config name from {}", path.display()))?;
+            return crate::config::AppConfig::load_named(name, Some(path), &self.layout);
+        }
+        let name = source
+            .from
+            .as_deref()
+            .or(default_name)
+            .ok_or_else(|| anyhow!("pass --from <config-name> or --config <file>"))?;
+        crate::config::AppConfig::load_named(name, None, &self.layout)
     }
 
     fn host_display_output(&self, invoked_as: &str, error: clap::Error) -> CommandOutput {

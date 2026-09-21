@@ -192,12 +192,16 @@ pub async fn build_client(
             let config = config.ok_or_else(|| anyhow!("missing config for stdio MCP client"))?;
             let policy = VersionPolicy::parse(config.config.server.protocol_version.as_deref())?;
             let log_level = load_server_log_level(layout, config).await;
-            Ok(Box::new(StdioMcpClient::new(
+            let client = StdioMcpClient::new(
                 config.name.clone(),
                 config.config.server.stdio.clone(),
                 policy,
                 log_level,
-            )?))
+            )?;
+            Ok(Box::new(match branded_client_info(config) {
+                Some((name, version)) => client.with_client_info(name, version),
+                None => client,
+            }))
         }
         ClientMode::StreamableHttp => {
             let config =
@@ -205,7 +209,7 @@ pub async fn build_client(
             let bearer_token = load_bearer_token(layout, config).await;
             let policy = VersionPolicy::parse(config.config.server.protocol_version.as_deref())?;
             let log_level = load_server_log_level(layout, config).await;
-            Ok(Box::new(StreamableHttpMcpClient::new(
+            let client = StreamableHttpMcpClient::new(
                 config.name.clone(),
                 config.config.server.endpoint.clone().ok_or_else(|| {
                     anyhow!("server.endpoint must be set for streamable HTTP transport")
@@ -213,7 +217,11 @@ pub async fn build_client(
                 bearer_token,
                 policy,
                 log_level,
-            )?))
+            )?;
+            Ok(Box::new(match branded_client_info(config) {
+                Some((name, version)) => client.with_client_info(name, version),
+                None => client,
+            }))
         }
     }
 }
@@ -339,7 +347,24 @@ pub struct StreamableHttpMcpClient {
     bearer_token: Option<String>,
 }
 
+/// The `clientInfo` a config's branding asks servers to see, if any.
+fn branded_client_info(config: &ResolvedAppConfig) -> Option<(String, String)> {
+    let branding = config.config.branding.as_ref()?;
+    let name = branding.name.clone().unwrap_or_else(|| config.name.clone());
+    let version = branding
+        .version
+        .clone()
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+    Some((name, version))
+}
+
 impl StdioMcpClient {
+    /// Introduce this client to the server as `name` `version`.
+    pub fn with_client_info(mut self, name: String, version: String) -> Self {
+        self.protocol = self.protocol.with_client_info(name, version);
+        self
+    }
+
     pub fn new(
         config_name: String,
         stdio: StdioServerConfig,
@@ -392,6 +417,9 @@ impl StdioMcpClient {
                 .ok_or_else(|| anyhow!("stdio command missing"))?,
         );
         command.args(&self.stdio.args);
+        for name in crate::dispatch::LAUNCHER_ENV {
+            command.env_remove(name);
+        }
         if let Some(cwd) = &self.stdio.cwd {
             command.current_dir(cwd);
         }
@@ -845,6 +873,12 @@ impl ModernSender for StdioModernSender<'_> {
 }
 
 impl StreamableHttpMcpClient {
+    /// Introduce this client to the server as `name` `version`.
+    pub fn with_client_info(mut self, name: String, version: String) -> Self {
+        self.protocol = self.protocol.with_client_info(name, version);
+        self
+    }
+
     pub fn new(
         config_name: String,
         endpoint: String,
@@ -3375,6 +3409,8 @@ mod tests {
                 events: EventConfig::default(),
                 telemetry: crate::telemetry::TelemetryConfig::default(),
                 profile: None,
+                discovery: crate::config::DiscoveryConfig::default(),
+                branding: None,
             },
         }
     }

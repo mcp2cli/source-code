@@ -24,6 +24,8 @@
 //!   daemon that holds warm MCP connections between invocations.
 //! - `mcp2cli man install | show` — emit or install the `mcp2cli(1)`
 //!   man page. See [`crate::man`] for the generated nroff source.
+//! - `mcp2cli package init | snapshot` — scaffold a config as a CLI
+//!   published under its own name. See [`crate::package`].
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use serde_json::json;
@@ -69,6 +71,95 @@ pub enum HostCommand {
     Daemon(DaemonArgs),
     /// Install man pages for mcp2cli and its aliases
     Man(ManArgs),
+    /// Package a config as a CLI published under its own name
+    Package(PackageArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PackageArgs {
+    #[command(subcommand)]
+    pub command: PackageCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PackageCommand {
+    /// Scaffold a publishable package: config, inventory snapshot, launcher
+    Init(PackageInitArgs),
+    /// Refresh a package's inventory snapshot from the live server
+    Snapshot(PackageSnapshotArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PackageSourceArgs {
+    /// Named config to package (default: the CLI name)
+    #[arg(long, conflicts_with = "config")]
+    pub from: Option<String>,
+    /// Config file to package, instead of a named config
+    #[arg(long)]
+    pub config: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct PackageInitArgs {
+    /// Command name of the published CLI
+    #[arg(long)]
+    pub name: String,
+    #[command(flatten)]
+    pub source: PackageSourceArgs,
+    /// Directory to write the package to (default: ./<name>-cli)
+    #[arg(long)]
+    pub out: Option<std::path::PathBuf>,
+    #[arg(long, value_enum, default_value_t = PackageTargetArg::Npm)]
+    pub target: PackageTargetArg,
+    /// Published package name, when it differs from the command name
+    #[arg(long = "package-name")]
+    pub package_name: Option<String>,
+    /// Version of the published package
+    #[arg(long = "package-version", default_value = "0.1.0")]
+    pub package_version: String,
+    /// One-line description shown at the top of --help
+    #[arg(long)]
+    pub about: Option<String>,
+    /// Built-in command to expose (repeatable): auth, jobs, doctor, inspect, ls,
+    /// ping, log, complete, subscribe, unsubscribe, tool, resource, prompt.
+    /// Default: auth for HTTP servers, none for stdio servers.
+    #[arg(long = "builtin", value_name = "COMMAND")]
+    pub builtin: Vec<String>,
+    /// Expose no built-in commands at all
+    #[arg(long = "no-builtins", conflicts_with = "builtin")]
+    pub no_builtins: bool,
+    /// Do not bundle an inventory snapshot; discover on first run instead
+    #[arg(long = "no-snapshot")]
+    pub no_snapshot: bool,
+    /// Overwrite files in a non-empty output directory
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct PackageSnapshotArgs {
+    #[command(flatten)]
+    pub source: PackageSourceArgs,
+    /// Snapshot file to write
+    #[arg(long, default_value = crate::package::SNAPSHOT_FILE_NAME)]
+    pub out: std::path::PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum PackageTargetArg {
+    /// npm package; `npx <name>` works, the runtime comes from the mcp2cli package
+    Npm,
+    /// POSIX launcher script for installs that already have mcp2cli on PATH
+    Shell,
+}
+
+impl From<PackageTargetArg> for crate::package::PackageTarget {
+    fn from(value: PackageTargetArg) -> Self {
+        match value {
+            PackageTargetArg::Npm => Self::Npm,
+            PackageTargetArg::Shell => Self::Shell,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -221,6 +312,96 @@ pub fn parse_host_cli(
         );
     let matches = command.try_get_matches_from_mut(argv.to_vec())?;
     HostCli::from_arg_matches(&matches)
+}
+
+pub fn package_init_output(
+    name: &str,
+    target: crate::package::PackageTarget,
+    report: &crate::package::PackageInitReport,
+    snapshot_items: Option<usize>,
+    snapshot_warning: Option<&str>,
+) -> CommandOutput {
+    let mut lines = vec![
+        format!("package: {}", report.out_dir.display()),
+        format!("target: {}", target.as_str()),
+        format!(
+            "built-in commands: {}",
+            if report.builtin_commands.is_empty() {
+                "(none)".to_owned()
+            } else {
+                report.builtin_commands.join(", ")
+            }
+        ),
+    ];
+    match (snapshot_items, snapshot_warning) {
+        (Some(items), _) => lines.push(format!("snapshot: {} capabilities", items)),
+        (None, Some(warning)) => lines.push(format!("snapshot: (skipped — {})", warning)),
+        (None, None) => lines.push("snapshot: (skipped — --no-snapshot)".to_owned()),
+    }
+    for warning in &report.warnings {
+        lines.push(format!("warning: {}", warning));
+    }
+    lines.push("files:".to_owned());
+    for file in &report.files {
+        let shown = file.strip_prefix(&report.out_dir).unwrap_or(file);
+        lines.push(format!("  {}", shown.display()));
+    }
+    lines.push(String::new());
+    lines.push("next:".to_owned());
+    match target {
+        crate::package::PackageTarget::Npm => {
+            lines.push(format!("  cd {} && npm install", report.out_dir.display()));
+            lines.push(format!("  node bin/{}.js --help", name));
+            lines.push("  npm publish --access public".to_owned());
+        }
+        crate::package::PackageTarget::Shell => {
+            lines.push(format!("  {} --help", report.launcher.display()));
+        }
+    }
+
+    CommandOutput::new(
+        "mcp2cli",
+        "package init",
+        format!("created package '{}'", name),
+        lines,
+        json!({
+            "name": name,
+            "target": target.as_str(),
+            "out_dir": report.out_dir,
+            "files": report.files,
+            "launcher": report.launcher,
+            "builtin_commands": report.builtin_commands,
+            "warnings": report.warnings,
+            "snapshot_items": snapshot_items,
+            "snapshot_warning": snapshot_warning,
+        }),
+    )
+}
+
+pub fn package_snapshot_output(
+    path: &std::path::Path,
+    snapshot: &crate::runtime::InventorySnapshot,
+) -> CommandOutput {
+    CommandOutput::new(
+        "mcp2cli",
+        "package snapshot",
+        format!("wrote inventory snapshot to {}", path.display()),
+        vec![
+            format!("snapshot: {}", path.display()),
+            format!("tools: {}", snapshot.tools.len()),
+            format!("resources: {}", snapshot.resources.len()),
+            format!("resource templates: {}", snapshot.resource_templates.len()),
+            format!("prompts: {}", snapshot.prompts.len()),
+        ],
+        json!({
+            "path": path,
+            "generated_at": snapshot.generated_at,
+            "tools": snapshot.tools.len(),
+            "resources": snapshot.resources.len(),
+            "resource_templates": snapshot.resource_templates.len(),
+            "prompts": snapshot.prompts.len(),
+        }),
+    )
 }
 
 pub fn configs_list_output(configs: &[NamedConfigSummary]) -> CommandOutput {

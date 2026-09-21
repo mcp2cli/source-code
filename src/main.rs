@@ -11,12 +11,21 @@
 //! Everything interesting lives in the library crate; see the
 //! top-level [`mcp2cli`] docs for the request lifecycle.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, process::ExitCode};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> ExitCode {
     let argv = std::env::args_os().collect::<Vec<_>>();
     let config_path = std::env::var_os("MCP2CLI_CONFIG").map(PathBuf::from);
-    let state = mcp2cli::app::build(argv, config_path).await?;
-    mcp2cli::app::run(state).await
+    let result = match mcp2cli::app::build(argv, config_path).await {
+        Ok(state) => mcp2cli::app::run(state).await,
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{}", mcp2cli::output::render_error(&error));
+            ExitCode::FAILURE
+        }
+    }
 }

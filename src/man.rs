@@ -649,6 +649,26 @@ eliminating cold-start latency.",
     ln(&mut out, "mcp2cli daemon status [--name \\fINAME\\fR]");
     ln(&mut out, ".fi");
 
+    ln(&mut out, ".SS package init|snapshot");
+    ln(
+        &mut out,
+        "Package a config as a CLI published under its own name: the config with a \
+\\fBbranding\\fR section, an inventory snapshot so its commands exist on first run, and a \
+launcher (\\fBnpm\\fR package or POSIX \\fBshell\\fR script). \\fBsnapshot\\fR refreshes \
+the inventory from the live server.",
+    );
+    ln(&mut out, ".PP");
+    ln(&mut out, ".nf");
+    ln(
+        &mut out,
+        "mcp2cli package init --name \\fINAME\\fR [--from \\fICONFIG\\fR] [--target npm|shell] [--out \\fIDIR\\fR]",
+    );
+    ln(
+        &mut out,
+        "mcp2cli package snapshot [--from \\fICONFIG\\fR | --config \\fIFILE\\fR] [--out \\fIFILE\\fR]",
+    );
+    ln(&mut out, ".fi");
+
     // ---- RUNTIME COMMANDS ---------------------------------------------------
     section(&mut out, "RUNTIME COMMANDS");
     ln(

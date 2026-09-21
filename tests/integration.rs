@@ -1030,3 +1030,455 @@ fn mapped_tool_missing_required_field_is_not_an_unrecognized_subcommand() {
         .stderr(predicate::str::contains("--message <TEXT>"))
         .stderr(predicate::str::contains("unrecognized subcommand").not());
 }
+
+// ---------------------------------------------------------------------------
+// Cold start: the first command works without a prior discovery
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cold_start_discovers_commands_on_first_use() {
+    let fixture = TestFixture::new();
+    fixture.write_demo_config("email");
+
+    // Nothing has populated the discovery cache: no `tool list`, no `ls`.
+    mcp2cli_cmd(&fixture)
+        .arg("email")
+        .arg("--json")
+        .arg("tools.echo")
+        .arg("--message")
+        .arg("hi")
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""message": "hi""#));
+}
+
+#[test]
+fn cold_start_ls_works_with_an_empty_cache() {
+    let fixture = TestFixture::new();
+    fixture.write_demo_config("email");
+
+    mcp2cli_cmd(&fixture)
+        .arg("email")
+        .arg("ls")
+        .arg("--tools")
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tools.echo"));
+}
+
+#[test]
+fn man_install_reaches_the_host_cli() {
+    let fixture = TestFixture::new();
+    let man_dir = fixture.dir.path().join("man1");
+
+    mcp2cli_cmd(&fixture)
+        .arg("man")
+        .arg("install")
+        .arg("--dir")
+        .arg(&man_dir)
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+    assert!(man_dir.join("mcp2cli.1").exists());
+}
+
+// ---------------------------------------------------------------------------
+// Published CLI: `package init`, then run it the way its launcher does
+// ---------------------------------------------------------------------------
+
+/// Scaffold the demo-backed `email` config as a package and return its directory.
+fn init_email_package(fixture: &TestFixture, extra_args: &[&str]) -> std::path::PathBuf {
+    fixture.write_demo_config("email");
+    let out = fixture.dir.path().join("email-cli");
+    mcp2cli_cmd(fixture)
+        .arg("package")
+        .arg("init")
+        .arg("--name")
+        .arg("email")
+        .arg("--about")
+        .arg("Send and search Acme Mail from your terminal")
+        .arg("--out")
+        .arg(&out)
+        .args(extra_args)
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+    out
+}
+
+/// The mcp2cli binary as a package's launcher starts it: named through
+/// `MCP2CLI_INVOKED_AS`, bound to the packaged config, on a machine that has no
+/// mcp2cli configuration or state of its own.
+fn packaged_cli(fixture: &TestFixture, package: &std::path::Path) -> assert_cmd::Command {
+    let home = fixture.dir.path().join("home");
+    let mut cmd = assert_cmd::Command::cargo_bin("mcp2cli").expect("binary should be built");
+    cmd.env_remove("MCP2CLI_CONFIG_DIR")
+        .env_remove("MCP2CLI_DATA_DIR")
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("MCP2CLI_TELEMETRY", "off")
+        .env("MCP2CLI_INVOKED_AS", "email")
+        .env("MCP2CLI_CONFIG", package.join("email.yaml"))
+        .env("MCP2CLI_BRANDING__VERSION", "2.0.0")
+        .timeout(std::time::Duration::from_secs(10));
+    cmd
+}
+
+/// Every file below `dir`, as paths relative to it.
+fn files_under(dir: &std::path::Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(relative) = path.strip_prefix(dir) {
+                found.push(relative.to_string_lossy().into_owned());
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn packaged_cli_presents_only_its_own_identity() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &[]);
+
+    packaged_cli(&fixture, &package)
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with(
+            "Send and search Acme Mail from your terminal",
+        ))
+        .stdout(predicate::str::contains("Usage: email [OPTIONS] <COMMAND>"))
+        .stdout(predicate::str::contains("tools.echo"))
+        .stdout(predicate::str::contains("auth"))
+        .stdout(predicate::str::contains("mcp2cli").not())
+        .stdout(predicate::str::contains("doctor").not())
+        .stdout(predicate::str::contains("--background").not());
+
+    packaged_cli(&fixture, &package)
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout("email 2.0.0\n");
+}
+
+#[test]
+fn packaged_cli_runs_a_command_on_a_machine_without_mcp2cli_state() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &[]);
+
+    packaged_cli(&fixture, &package)
+        .arg("--json")
+        .arg("tools.echo")
+        .arg("--message")
+        .arg("hi")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""message": "hi""#));
+
+    // Its state is its own: a user's mcp2cli config that happens to be called
+    // `email` must never share tokens or cache with this CLI.
+    let files = files_under(&fixture.dir.path().join("home"));
+    assert!(
+        files
+            .iter()
+            .any(|file| file.ends_with("email/instances/email/state.json")),
+        "{files:?}"
+    );
+    assert!(
+        files.iter().all(|file| !file.contains("mcp2cli")),
+        "{files:?}"
+    );
+}
+
+#[test]
+fn packaged_cli_exposes_only_the_builtins_it_lists() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &[]);
+
+    // `auth` is the default for an HTTP server…
+    packaged_cli(&fixture, &package)
+        .arg("auth")
+        .arg("status")
+        .assert()
+        .success();
+
+    // …everything else of mcp2cli's surface is gone, on both parsers.
+    for hidden in [
+        &["doctor"][..],
+        &["ls"],
+        &["tool", "list"],
+        &["invoke", "--capability", "tools.echo"],
+    ] {
+        packaged_cli(&fixture, &package)
+            .args(hidden)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(format!(
+                "unrecognized subcommand '{}'",
+                hidden[0]
+            )));
+    }
+}
+
+#[test]
+fn packaged_cli_help_comes_from_the_snapshot_when_the_server_is_unreachable() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &[]);
+    assert!(package.join("inventory.json").exists());
+
+    // Same package, but the server can no longer be reached.
+    let config = package.join("email.yaml");
+    let yaml = std::fs::read_to_string(&config).expect("packaged config should exist");
+    std::fs::write(
+        &config,
+        yaml.replace("https://demo.invalid/mcp", "http://127.0.0.1:9/mcp"),
+    )
+    .expect("packaged config should be rewritten");
+
+    packaged_cli(&fixture, &package)
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tools.echo"));
+    packaged_cli(&fixture, &package)
+        .arg("tools.echo")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--message <TEXT>"));
+
+    // Running the command still needs the server — and says so.
+    packaged_cli(&fixture, &package)
+        .arg("tools.echo")
+        .arg("--message")
+        .arg("hi")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand").not());
+}
+
+#[test]
+fn packaged_cli_without_a_command_list_blames_the_connection_not_the_user() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &["--no-snapshot"]);
+    assert!(!package.join("inventory.json").exists());
+
+    let config = package.join("email.yaml");
+    let yaml = std::fs::read_to_string(&config).expect("packaged config should exist");
+    std::fs::write(
+        &config,
+        yaml.replace("https://demo.invalid/mcp", "http://127.0.0.1:9/mcp"),
+    )
+    .expect("packaged config should be rewritten");
+
+    packaged_cli(&fixture, &package)
+        .arg("tools.echo")
+        .arg("--message")
+        .arg("hi")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("could not load the command list"))
+        .stderr(predicate::str::contains("email auth login"))
+        .stderr(predicate::str::contains("unrecognized subcommand").not());
+
+    // Login must stay reachable in exactly this situation.
+    packaged_cli(&fixture, &package)
+        .arg("auth")
+        .arg("status")
+        .assert()
+        .success();
+    packaged_cli(&fixture, &package)
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("auth"));
+}
+
+#[test]
+fn package_snapshot_refreshes_the_inventory_from_a_packaged_config() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &["--no-snapshot"]);
+    let snapshot = package.join("inventory.json");
+
+    mcp2cli_cmd(&fixture)
+        .arg("package")
+        .arg("snapshot")
+        .arg("--config")
+        .arg(package.join("email.yaml"))
+        .arg("--out")
+        .arg(&snapshot)
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tools: 2"));
+
+    let written = std::fs::read_to_string(&snapshot).expect("snapshot should be written");
+    assert!(written.contains(r#""schema_version": 1"#), "{written}");
+    assert!(written.contains("tools.echo"), "{written}");
+}
+
+#[test]
+fn packaged_cli_cannot_be_turned_back_into_mcp2cli_from_argv() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &[]);
+
+    // `--url`/`--stdio` select an ad-hoc server for mcp2cli itself. For a CLI
+    // bound to one server they are just unknown options (or a tool's own flag).
+    for adhoc in [
+        &["--url", "https://demo.invalid/mcp", "--help"][..],
+        &["--stdio", "cat", "--help"],
+    ] {
+        let output = packaged_cli(&fixture, &package)
+            .args(adhoc)
+            .output()
+            .expect("cli should run");
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!text.contains("mcp2cli"), "{adhoc:?} printed: {text}");
+        assert!(!text.contains("doctor"), "{adhoc:?} printed: {text}");
+    }
+
+    // `--config` cannot swap the bound config, and cannot reach the static
+    // bridge's help, which only that parser knows the option for.
+    let output = packaged_cli(&fixture, &package)
+        .args(["--config", "/nonexistent/other.yaml", "--help"])
+        .output()
+        .expect("cli should run");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!text.contains("MCP bridge CLI"), "{text}");
+    assert!(!text.contains("not found"), "{text}");
+
+    // None of that may have woken mcp2cli's own telemetry or state.
+    let files = files_under(&fixture.dir.path().join("home"));
+    assert!(
+        files.iter().all(|file| !file.contains("mcp2cli")),
+        "{files:?}"
+    );
+}
+
+#[test]
+fn packaged_cli_keeps_its_tokens_apart_under_an_exported_data_dir() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &[]);
+
+    // The user logs in to their own `email` config…
+    mcp2cli_cmd(&fixture)
+        .arg("email")
+        .arg("auth")
+        .arg("login")
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    // …and has MCP2CLI_DATA_DIR exported when running a published CLI that is
+    // also called `email`. It must not find itself logged in with those tokens.
+    packaged_cli(&fixture, &package)
+        .env("MCP2CLI_DATA_DIR", fixture.data_dir())
+        .arg("auth")
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("logged_out"));
+    assert!(
+        fixture
+            .data_dir()
+            .join("apps/email/instances/email/state.json")
+            .exists()
+    );
+}
+
+#[test]
+fn packaged_cli_refuses_background_runs_it_could_not_collect() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &["--builtin", "auth", "--builtin", "tool"]);
+
+    packaged_cli(&fixture, &package)
+        .args(["tool", "call", "tasks.run", "--background"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--background is not available"));
+}
+
+#[test]
+fn packaged_cli_version_is_one_line_even_without_a_configured_version() {
+    let fixture = TestFixture::new();
+    let package = init_email_package(&fixture, &[]);
+
+    packaged_cli(&fixture, &package)
+        .env_remove("MCP2CLI_BRANDING__VERSION")
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^email \d+\.\d+\.\d+\n$").expect("valid regex"));
+
+    // A launcher's version is text: `1.10` must not come back as `1.1`.
+    packaged_cli(&fixture, &package)
+        .env("MCP2CLI_BRANDING__VERSION", "1.10")
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout("email 1.10\n");
+}
+
+#[test]
+fn cold_start_help_against_a_silent_server_returns_within_the_timeout() {
+    // Accepts connections and never answers — the worst case for a discovery
+    // that runs before `--help` can print anything.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let port = listener
+        .local_addr()
+        .expect("listener has an address")
+        .port();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming().flatten() {
+            held.push(stream);
+        }
+    });
+
+    let fixture = TestFixture::new();
+    let config_dir = fixture.config_dir().join("configs");
+    std::fs::create_dir_all(&config_dir).expect("config dir should be created");
+    std::fs::write(
+        config_dir.join("slow.yaml"),
+        format!(
+            "schema_version: 1\nserver:\n  display_name: Slow Server\n  transport: streamable_http\n  endpoint: http://127.0.0.1:{port}/mcp\nevents:\n  enable_stdio_events: false\n"
+        ),
+    )
+    .expect("config should be written");
+
+    let started = std::time::Instant::now();
+    mcp2cli_cmd(&fixture)
+        .args(["slow", "--timeout", "2", "--help"])
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Usage: slow"))
+        .stdout(predicate::str::contains("could not load the command list"));
+    // One budget for the whole discovery, not one operation timeout (120 s by
+    // default) per category.
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "help took {:?}",
+        started.elapsed()
+    );
+}

@@ -39,6 +39,8 @@
 //! - [`config`] — YAML config schema, figment loading, profile overlays.
 //! - [`output`] — structured `CommandOutput` + JSON/NDJSON/human
 //!   formatters.
+//! - [`package`] — `mcp2cli package`: scaffold a CLI published under its
+//!   own name (config + inventory snapshot + launcher) from a config.
 //! - [`observability`] — tracing subscriber wiring.
 //! - [`telemetry`] — opt-in local telemetry sink.
 //! - [`tls`] — shared trust-store construction for every outbound HTTPS
@@ -74,6 +76,7 @@ pub mod man;
 pub mod mcp;
 pub mod observability;
 pub mod output;
+pub mod package;
 pub mod runtime;
 pub mod telemetry;
 pub mod tls;
