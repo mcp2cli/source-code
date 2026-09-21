@@ -199,3 +199,86 @@ jobs:
             exit 0
           fi
           cargo publish --locked
+
+  publish-npm:
+    # Same gate as the crate: every target must have built. npm versions are
+    # immutable too, and the `mcp2cli` package pins its per-platform binary
+    # packages at this exact version — a partial set would install on some
+    # platforms and fail on others.
+    needs: [plan, build]
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - name: Check for an npm token
+        id: gate
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::notice::NPM_TOKEN is not configured — skipping the npm publish."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Download release archives
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          # npm ships the musl builds on Linux (static, no glibc floor) and
+          # the native builds on macOS — see tools/npm/build.mjs.
+          gh release download "${{ needs.plan.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --dir artifacts \
+            --pattern '*-unknown-linux-musl.tar.xz' \
+            --pattern '*-apple-darwin.tar.xz'
+
+      - name: Assemble packages
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          node tools/npm/build.mjs \
+            --version "${{ needs.plan.outputs.version }}" \
+            --archives artifacts \
+            --out npm-dist | tee packages.tsv
+
+      - name: Publish (idempotent)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.plan.outputs.version }}"
+          # Prereleases (develop → alpha, next → beta) must not move `latest`.
+          case "$VERSION" in
+            *-alpha*) DIST_TAG=alpha ;;
+            *-beta*)  DIST_TAG=beta ;;
+            *)        DIST_TAG=latest ;;
+          esac
+          # packages.tsv lists the platform packages first: the `mcp2cli`
+          # package depends on them, so it goes last.
+          while IFS="$(printf '\t')" read -r name dir; do
+            # Short-circuit on re-drives, like the crates.io job above.
+            if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
+              echo "${name}@${VERSION} already on npm — nothing to do"
+              continue
+            fi
+            npm publish "$dir" --access public --provenance --tag "$DIST_TAG"
+          done < packages.tsv
