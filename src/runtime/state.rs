@@ -143,6 +143,10 @@ struct PersistedState {
     /// per-request via `_meta[io.modelcontextprotocol/logLevel]` instead.
     #[serde(default)]
     server_log_levels: BTreeMap<String, String>,
+    /// `generated_at` of the snapshot that last seeded each config's
+    /// inventory, so one snapshot seeds the cache exactly once.
+    #[serde(default)]
+    seeded_snapshots: BTreeMap<String, DateTime<Utc>>,
 }
 
 pub struct StateStore {
@@ -260,6 +264,34 @@ impl StateStore {
             .discovery_inventory
             .get(config_name)
             .cloned()
+    }
+
+    /// `generated_at` of the snapshot that last seeded this config's inventory.
+    pub async fn seeded_snapshot(&self, config_name: &str) -> Option<DateTime<Utc>> {
+        self.state
+            .lock()
+            .await
+            .seeded_snapshots
+            .get(config_name)
+            .copied()
+    }
+
+    /// Replace a config's cached inventory with one taken from a snapshot, and
+    /// remember which snapshot it was. The inventory keeps the snapshot's
+    /// timestamp, so any later live discovery is newer.
+    pub async fn seed_discovery_inventory(&self, inventory: DiscoveryInventoryView) -> Result<()> {
+        let bytes = {
+            let mut state = self.state.lock().await;
+            state
+                .seeded_snapshots
+                .insert(inventory.config_name.clone(), inventory.updated_at);
+            state
+                .discovery_inventory
+                .insert(inventory.config_name.clone(), inventory);
+            serde_json::to_vec_pretty(&*state)
+                .context("failed to serialize discovery inventory state")?
+        };
+        self.persist_bytes(bytes).await
     }
 
     pub async fn upsert_discovery_inventory(

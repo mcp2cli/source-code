@@ -274,17 +274,14 @@ impl CommandManifest {
         }
 
         // Rename resource verb if specified
-        if let Some(verb) = &profile.resource_verb
-            && let Some(entry) = self.commands.swap_remove("get")
-        {
-            self.commands.insert(verb.clone(), entry);
+        if let Some(verb) = &profile.resource_verb {
+            rename_in_place(&mut self.commands, "get", verb);
         }
 
         // Apply renames
         for (old_name, new_name) in &profile.aliases {
             // Try top-level rename first
-            if let Some(entry) = self.commands.swap_remove(old_name) {
-                self.commands.insert(new_name.clone(), entry);
+            if rename_in_place(&mut self.commands, old_name, new_name) {
                 continue;
             }
             // Dotted alias: rename a child within a group (e.g. "create.payload" → "object")
@@ -296,17 +293,15 @@ impl CommandManifest {
                 let new_child = new_name
                     .strip_prefix(&format!("{}.", group))
                     .unwrap_or(new_name);
-                if let Some(ManifestEntry::Group { children, .. }) = self.commands.get_mut(group)
-                    && let Some(cmd) = children.swap_remove(child)
-                {
-                    children.insert(new_child.to_owned(), cmd);
+                if let Some(ManifestEntry::Group { children, .. }) = self.commands.get_mut(group) {
+                    rename_in_place(children, child, new_child);
                 }
             }
         }
 
         // Hide commands
         for name in &profile.hide {
-            self.commands.swap_remove(name);
+            self.commands.shift_remove(name);
         }
 
         // Apply custom groups
@@ -314,7 +309,7 @@ impl CommandManifest {
             let mut children = IndexMap::new();
             for member in members {
                 // Look for member in top-level commands
-                if let Some(ManifestEntry::Command(cmd)) = self.commands.swap_remove(member) {
+                if let Some(ManifestEntry::Command(cmd)) = self.commands.shift_remove(member) {
                     let child_name = member
                         .strip_prefix(&format!("{}.", group_name))
                         .unwrap_or(member)
@@ -337,9 +332,7 @@ impl CommandManifest {
         for (cmd_name, flag_renames) in &profile.flags {
             if let Some(ManifestEntry::Command(cmd)) = self.commands.get_mut(cmd_name) {
                 for (old_flag, new_flag) in flag_renames {
-                    if let Some(spec) = cmd.flags.swap_remove(old_flag) {
-                        cmd.flags.insert(new_flag.clone(), spec);
-                    }
+                    rename_in_place(&mut cmd.flags, old_flag, new_flag);
                 }
             }
         }
@@ -363,6 +356,17 @@ impl CommandManifest {
 // ---------------------------------------------------------------------------
 // Conversion helpers
 // ---------------------------------------------------------------------------
+
+/// Rename a key without moving its entry: help lists commands and flags in map
+/// order, and a rename should not reshuffle the server's ordering.
+fn rename_in_place<V>(map: &mut IndexMap<String, V>, old: &str, new: &str) -> bool {
+    let Some((index, _, value)) = map.shift_remove_full(old) else {
+        return false;
+    };
+    map.shift_remove(new);
+    map.shift_insert(index.min(map.len()), new.to_owned(), value);
+    true
+}
 
 fn tool_to_command(tool: &Value) -> Option<ManifestCommand> {
     let name = tool
@@ -893,6 +897,35 @@ mod tests {
         } else {
             panic!("email should still be a Group");
         }
+    }
+
+    #[test]
+    fn profile_renames_and_hides_keep_the_servers_command_order() {
+        let inventory = DiscoveryInventoryView {
+            config_name: "email".to_owned(),
+            app_id: "bridge".to_owned(),
+            tools: Some(
+                ["send", "search", "archive", "purge"]
+                    .iter()
+                    .map(|name| json!({ "id": name, "kind": "tool" }))
+                    .collect(),
+            ),
+            resources: None,
+            resource_templates: None,
+            prompts: None,
+            updated_at: chrono::Utc::now(),
+        };
+        let mut manifest = CommandManifest::from_inventory(&inventory);
+        manifest.apply_profile(&ProfileOverlay {
+            aliases: IndexMap::from([("send".to_owned(), "compose".to_owned())]),
+            hide: vec!["search".to_owned()],
+            ..ProfileOverlay::default()
+        });
+
+        // Help lists commands in this order; a rename or a hide must not move
+        // the commands around it.
+        let names: Vec<&str> = manifest.commands.keys().map(String::as_str).collect();
+        assert_eq!(names, ["compose", "archive", "purge"]);
     }
 
     #[test]

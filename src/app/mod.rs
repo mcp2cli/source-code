@@ -55,7 +55,14 @@ pub struct AppState {
 pub async fn build(argv: Vec<OsString>, config_path: Option<PathBuf>) -> Result<AppState> {
     let invocation = Invocation::capture(argv);
     let layout = RuntimeLayout::discover();
-    let config_path = config_path_from_argv(&invocation.argv).or(config_path);
+    // A launcher binds the binary to one config through the environment; there,
+    // a `--config` in argv is the published CLI's own business (a tool's flag),
+    // not a way to load something else.
+    let launched = std::env::var_os(crate::dispatch::INVOKED_AS_ENV).is_some();
+    let config_path = match (launched, config_path) {
+        (true, Some(path)) => Some(path),
+        (_, config_path) => config_path_from_argv(&invocation.argv).or(config_path),
+    };
 
     // Check for --no-telemetry flag early (before full parse)
     if invocation.argv.iter().any(|a| a == "--no-telemetry") {
@@ -65,6 +72,12 @@ pub async fn build(argv: Vec<OsString>, config_path: Option<PathBuf>) -> Result<
     let initial_target = resolve_invocation(&invocation);
     let (dispatch_target, selected_config) =
         resolve_runtime_selection(initial_target, &invocation, config_path.as_deref(), &layout)?;
+    // A branded CLI keeps its state, tokens and telemetry id in its own data
+    // directory; everything below must use that layout.
+    let layout = match &selected_config {
+        Some(config) => layout.for_config(&config.config, &config.name),
+        None => layout,
+    };
 
     let fallback_logging = LoggingConfig::default();
     let observability = observability::init(
@@ -205,6 +218,8 @@ fn dispatch_target_category(target: &DispatchTarget) -> &str {
                 Some("link") => "link",
                 Some("use") => "use",
                 Some("daemon") => "daemon",
+                Some("man") => "man",
+                Some("package") => "package",
                 _ => "host",
             }
         }

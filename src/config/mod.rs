@@ -77,8 +77,15 @@ const ENV_PREFIX: &str = "MCP2CLI_";
 /// `.split("__")` turns those into `"telemetry.enabled"`, which doesn't
 /// match the ignored bare key `"telemetry"`.
 fn env_provider() -> Env {
-    Env::prefixed(ENV_PREFIX).ignore(&["telemetry"]).split("__")
+    // `branding__version` is read verbatim in `apply_embedded_defaults`: figment
+    // parses env values, and a launcher passing `1.10` means the text, not 1.1.
+    Env::prefixed(ENV_PREFIX)
+        .ignore(&["telemetry", "branding__version"])
+        .split("__")
 }
+
+/// Environment override for `branding.version`, set by launchers.
+const BRANDING_VERSION_ENV: &str = "MCP2CLI_BRANDING__VERSION";
 
 /// Root configuration model for a named MCP server binding.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -104,6 +111,14 @@ pub struct AppConfig {
     /// Optional profile overlay to customize the dynamic CLI surface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<crate::apps::manifest::ProfileOverlay>,
+    /// How the command list is obtained: cold-start discovery, a bundled
+    /// snapshot, and cache freshness.
+    #[serde(default, skip_serializing_if = "DiscoveryConfig::is_default")]
+    pub discovery: DiscoveryConfig,
+    /// Present when this config backs a CLI published under its own name.
+    /// Switches the runtime into embedded mode — see [`BrandingConfig`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branding: Option<BrandingConfig>,
 }
 
 impl Default for AppConfig {
@@ -119,6 +134,8 @@ impl Default for AppConfig {
             events: EventConfig::default(),
             telemetry: crate::telemetry::TelemetryConfig::default(),
             profile: None,
+            discovery: DiscoveryConfig::default(),
+            branding: None,
         }
     }
 }
@@ -155,7 +172,8 @@ impl AppConfig {
         let mut config: AppConfig = figment
             .extract()
             .context("failed to load application config")?;
-        config.apply_runtime_defaults(layout, name);
+        config.apply_embedded_defaults(&config_path);
+        config.apply_runtime_defaults(&layout.for_config(&config, name), name);
         config.validate()?;
 
         Ok(ResolvedAppConfig {
@@ -196,7 +214,45 @@ impl AppConfig {
         self.app.validate()?;
         self.server.validate()?;
         self.logging.validate()?;
+        if let Some(branding) = &self.branding {
+            branding.validate()?;
+        }
         Ok(())
+    }
+
+    /// Settings that depend on where the config file lives, or on which keys
+    /// the file actually sets (as opposed to inheriting a default).
+    fn apply_embedded_defaults(&mut self, config_path: &Path) {
+        // A snapshot path is relative to the config file, so a published
+        // package can ship the two side by side wherever it is installed.
+        if let Some(snapshot) = &self.discovery.snapshot {
+            let snapshot = Path::new(snapshot);
+            if snapshot.is_relative()
+                && let Some(parent) = config_path.parent()
+            {
+                self.discovery.snapshot =
+                    Some(parent.join(snapshot).to_string_lossy().into_owned());
+            }
+        }
+
+        if let Some(branding) = &mut self.branding
+            && let Ok(version) = std::env::var(BRANDING_VERSION_ENV)
+            && !version.trim().is_empty()
+        {
+            branding.version = Some(version);
+        }
+
+        // mcp2cli's own usage telemetry is opt-out for mcp2cli users, but a CLI
+        // published under another name must not report to mcp2cli unless its
+        // publisher asks for that explicitly.
+        if self.branding.is_some() {
+            let explicit = Figment::new()
+                .merge(Yaml::file(config_path))
+                .merge(env_provider());
+            if explicit.find_value("telemetry.enabled").is_err() {
+                self.telemetry.enabled = false;
+            }
+        }
     }
 
     fn apply_runtime_defaults(&mut self, layout: &RuntimeLayout, config_name: &str) {
@@ -359,6 +415,144 @@ impl StdioServerConfig {
             }
         }
         Ok(())
+    }
+}
+
+/// How the dynamic command surface gets its command list.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryConfig {
+    /// Discover the server's capabilities on demand when nothing is cached
+    /// yet, so the first command a user runs already works. Default: true.
+    #[serde(default = "default_discovery_auto")]
+    pub auto: bool,
+    /// Path to an inventory snapshot (written by `mcp2cli package snapshot`),
+    /// relative to the config file. Gives instant, offline `--help` — also
+    /// before login, when the server could not be asked yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
+    /// Re-discover when the cached command list is older than this many
+    /// seconds. A failed refresh keeps the stale list. Default: never.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+}
+
+impl DiscoveryConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl Default for DiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            auto: default_discovery_auto(),
+            snapshot: None,
+            ttl_seconds: None,
+        }
+    }
+}
+
+fn default_discovery_auto() -> bool {
+    true
+}
+
+/// Built-in commands a published CLI can expose through
+/// [`BrandingConfig::builtin_commands`].
+pub const BUILTIN_COMMANDS: &[&str] = &[
+    "auth",
+    "jobs",
+    "doctor",
+    "inspect",
+    "ls",
+    "ping",
+    "log",
+    "complete",
+    "subscribe",
+    "unsubscribe",
+    "tool",
+    "resource",
+    "prompt",
+];
+
+/// Identity of a CLI published on top of mcp2cli under its own name.
+///
+/// The presence of this section switches the runtime into *embedded mode*:
+/// help, `--version`, the OAuth client name and the MCP `clientInfo` carry the
+/// publisher's identity instead of mcp2cli's, state lives in the CLI's own data
+/// directory, mcp2cli's usage telemetry is off unless enabled explicitly, and
+/// the generic mcp2cli surface never shows through.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct BrandingConfig {
+    /// Product name. Defaults to the name the CLI was invoked as. Names the
+    /// data directory and identifies the CLI to the server and during login.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// One-line description at the top of `--help`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
+    /// Version reported by `--version` (the published package's version).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_version"
+    )]
+    pub version: Option<String>,
+    /// Free text appended to the top-level `--help` (examples, links).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_help: Option<String>,
+    /// Built-in commands to expose, from [`BUILTIN_COMMANDS`]. `None` exposes
+    /// all of them; an empty list leaves only the server's own commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin_commands: Option<Vec<String>>,
+    /// Append "powered by mcp2cli" to the help header. Default: false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub attribution: bool,
+}
+
+/// A version is text. YAML reads an unquoted `1.0` as a number, and turning that
+/// back into text would silently print `1` — so ask for the quotes instead.
+fn deserialize_version<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Version {
+        Text(String),
+        Other(serde::de::IgnoredAny),
+    }
+
+    match Option::<Version>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(Version::Text(version)) => Ok(Some(version)),
+        Some(Version::Other(_)) => Err(serde::de::Error::custom(
+            "branding.version must be a string — quote it, e.g. version: \"1.0\"",
+        )),
+    }
+}
+
+impl BrandingConfig {
+    fn validate(&self) -> Result<()> {
+        if let Some(name) = &self.name {
+            validate_config_name(name).context("branding.name is not a valid name")?;
+        }
+        for command in self.builtin_commands.iter().flatten() {
+            if !BUILTIN_COMMANDS.contains(&command.as_str()) {
+                return Err(anyhow!(
+                    "branding.builtin_commands: unknown command '{}' (expected one of: {})",
+                    command,
+                    BUILTIN_COMMANDS.join(", ")
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether the built-in command `name` is part of this CLI's surface.
+    pub fn allows_builtin(&self, name: &str) -> bool {
+        self.builtin_commands
+            .as_ref()
+            .is_none_or(|allowed| allowed.iter().any(|command| command == name))
     }
 }
 
@@ -564,6 +758,35 @@ impl RuntimeLayout {
         }
     }
 
+    /// The layout a given config runs with. A branded CLI keeps its state in a
+    /// data directory of its own (`~/.local/share/<name>` on Linux) rather than
+    /// in mcp2cli's. This is what keeps its tokens apart from a same-named
+    /// mcp2cli config the user already has — tokens are stored per config name,
+    /// and a published CLI chooses its own name and its own endpoint.
+    ///
+    /// `MCP2CLI_DATA_DIR` relocates the directory but must not undo that: a user
+    /// who exports it for mcp2cli would otherwise hand every branded CLI they
+    /// run the tokens of their own configs. There, a branded CLI gets
+    /// `<dir>/apps/<name>`.
+    pub fn for_config(&self, config: &AppConfig, config_name: &str) -> Self {
+        let Some(branding) = &config.branding else {
+            return self.clone();
+        };
+        let name = branding.name.as_deref().unwrap_or(config_name);
+        let data_root = if std::env::var_os("MCP2CLI_DATA_DIR").is_some() {
+            self.data_root.join("apps").join(name)
+        } else {
+            match ProjectDirs::from("", "", name) {
+                Some(dirs) => dirs.data_dir().to_path_buf(),
+                None => self.data_root.join("apps").join(name),
+            }
+        };
+        Self {
+            data_root,
+            ..self.clone()
+        }
+    }
+
     pub fn configs_dir(&self) -> PathBuf {
         self.config_root.join("configs")
     }
@@ -754,6 +977,10 @@ pub fn validate_config_name(name: &str) -> Result<()> {
     if name.trim().is_empty() {
         return Err(anyhow!("config name must not be empty"));
     }
+    // Names become path segments (`instances/<name>`, a branded data directory).
+    if name.chars().all(|ch| ch == '.') {
+        return Err(anyhow!("config name '{}' is not allowed", name));
+    }
     if !name
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
@@ -845,6 +1072,150 @@ mod tests {
         assert_eq!(loaded.config.plugins.search_dirs, Vec::<String>::new());
     }
 
+    /// Serializes the tests below that set, or read a config under,
+    /// `MCP2CLI_TELEMETRY*` — the process environment is shared across the
+    /// test threads.
+    static TELEMETRY_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn telemetry_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        TELEMETRY_ENV
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn write_config(dir: &Path, yaml: &str) -> PathBuf {
+        let path = dir.join("email.yaml");
+        fs::write(&path, yaml).expect("config should be written");
+        path
+    }
+
+    fn test_layout(dir: &Path) -> RuntimeLayout {
+        RuntimeLayout {
+            config_root: dir.join("config"),
+            data_root: dir.join("data"),
+            link_root: dir.join("bin"),
+        }
+    }
+
+    const SERVER: &str =
+        "server:\n  display_name: Acme Mail\n  endpoint: https://mcp.example.com\n";
+
+    #[test]
+    fn branding_turns_mcp2cli_telemetry_off_unless_the_publisher_enables_it() {
+        let _env = telemetry_env_lock();
+        let dir = tempfile::tempdir().expect("tempdir should be created");
+        let layout = test_layout(dir.path());
+        let load = |yaml: String| {
+            let path = write_config(dir.path(), &yaml);
+            AppConfig::load_named("email", Some(&path), &layout)
+                .expect("config should load")
+                .config
+        };
+
+        // mcp2cli's own users are opted in by default…
+        assert!(load(SERVER.to_owned()).telemetry.enabled);
+        // …a CLI published under another name is not…
+        assert!(
+            !load(format!("{SERVER}branding:\n  name: acme-mail\n"))
+                .telemetry
+                .enabled
+        );
+        // …unless its publisher says so.
+        assert!(
+            load(format!(
+                "{SERVER}branding:\n  name: acme-mail\ntelemetry:\n  enabled: true\n"
+            ))
+            .telemetry
+            .enabled
+        );
+    }
+
+    #[test]
+    fn snapshot_path_is_resolved_next_to_the_config_file() {
+        let dir = tempfile::tempdir().expect("tempdir should be created");
+        let path = write_config(
+            dir.path(),
+            &format!("{SERVER}discovery:\n  snapshot: inventory.json\n"),
+        );
+        let config = AppConfig::load_named("email", Some(&path), &test_layout(dir.path()))
+            .expect("config should load")
+            .config;
+        assert_eq!(
+            config.discovery.snapshot.as_deref(),
+            dir.path().join("inventory.json").to_str()
+        );
+        assert!(config.discovery.auto);
+    }
+
+    #[test]
+    fn rejects_an_unknown_builtin_command() {
+        let dir = tempfile::tempdir().expect("tempdir should be created");
+        let path = write_config(
+            dir.path(),
+            &format!("{SERVER}branding:\n  builtin_commands: [auth, doktor]\n"),
+        );
+        let error = AppConfig::load_named("email", Some(&path), &test_layout(dir.path()))
+            .expect_err("unknown built-in must be rejected");
+        assert!(error.to_string().contains("'doktor'"), "{error}");
+    }
+
+    #[test]
+    fn only_a_branded_config_gets_a_data_directory_of_its_own() {
+        let dir = tempfile::tempdir().expect("tempdir should be created");
+        let layout = test_layout(dir.path());
+        let plain = AppConfig::default();
+        assert_eq!(layout.for_config(&plain, "email"), layout);
+
+        // Whether the root comes from the platform or from MCP2CLI_DATA_DIR, a
+        // branded config never lands in the directory a same-named mcp2cli
+        // config keeps its tokens in.
+        let branded = AppConfig {
+            branding: Some(BrandingConfig {
+                name: Some("acme-mail".to_owned()),
+                ..BrandingConfig::default()
+            }),
+            ..AppConfig::default()
+        };
+        let branded_layout = layout.for_config(&branded, "email");
+        assert_ne!(branded_layout.data_root, layout.data_root);
+        assert!(branded_layout.data_root.ends_with("acme-mail"));
+        assert_ne!(
+            branded_layout.token_store_path("email"),
+            layout.token_store_path("email")
+        );
+        assert_eq!(branded_layout.config_root, layout.config_root);
+    }
+
+    #[test]
+    fn rejects_names_that_would_escape_their_directory() {
+        for name in [".", "..", "..."] {
+            assert!(
+                validate_config_name(name).is_err(),
+                "{name} must be rejected"
+            );
+        }
+        assert!(validate_config_name("instruction.md").is_ok());
+    }
+
+    #[test]
+    fn an_unquoted_numeric_version_is_rejected_with_a_fix() {
+        let dir = tempfile::tempdir().expect("tempdir should be created");
+        let layout = test_layout(dir.path());
+        let path = write_config(dir.path(), &format!("{SERVER}branding:\n  version: 1.0\n"));
+        let error = AppConfig::load_named("email", Some(&path), &layout)
+            .expect_err("a numeric version must be rejected");
+        assert!(format!("{error:#}").contains("quote it"), "{error:#}");
+
+        let path = write_config(
+            dir.path(),
+            &format!("{SERVER}branding:\n  version: \"1.0\"\n"),
+        );
+        let config = AppConfig::load_named("email", Some(&path), &layout)
+            .expect("a quoted version should load")
+            .config;
+        assert_eq!(config.branding.unwrap().version.as_deref(), Some("1.0"));
+    }
+
     /// Regression test: `MCP2CLI_TELEMETRY=off` is documented and tested
     /// (`telemetry::tests::disabled_by_env`) as a simple on/off toggle,
     /// read directly from the environment by
@@ -855,13 +1226,14 @@ mod tests {
     /// which broke config loading outright for every command that set
     /// this env var. `env_provider()` now excludes the bare key.
     ///
-    /// SAFETY: test-only env mutation; not behind a lock like the
-    /// telemetry/tls module tests use for the same variable, so a run
-    /// with `disabled_by_env` in `telemetry::tests` interleaved on
-    /// another thread could in principle race — accepted here to match
-    /// this codebase's existing convention for env-var tests.
+    /// SAFETY: test-only env mutation, serialized within this module by
+    /// `telemetry_env_lock`. It is not the lock the telemetry/tls module
+    /// tests use for the same variable, so `disabled_by_env` in
+    /// `telemetry::tests` could in principle still interleave — accepted
+    /// here to match this codebase's existing convention for env-var tests.
     #[test]
     fn bare_telemetry_env_var_does_not_break_config_loading() {
+        let _env = telemetry_env_lock();
         let root = test_tempdir();
         let layout = RuntimeLayout {
             config_root: root.path().join("config"),
@@ -895,6 +1267,7 @@ mod tests {
 
     #[test]
     fn nested_telemetry_env_override_still_reaches_the_config() {
+        let _env = telemetry_env_lock();
         let root = test_tempdir();
         let layout = RuntimeLayout {
             config_root: root.path().join("config"),

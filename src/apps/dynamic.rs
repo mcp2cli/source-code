@@ -21,6 +21,7 @@ use crate::{
             CommandKind, CommandManifest, FlagSpec, FlagType, ManifestCommand, ManifestEntry,
         },
     },
+    config::BrandingConfig,
     mcp::model::{DiscoveryCategory, McpOperation, McpOperationResult},
     output::{CommandOutput, ExecutionReport, OutputFormat},
     runtime::RuntimeEvent,
@@ -44,15 +45,43 @@ const RUNTIME_COMMANDS: &[&str] = &[
 // Dynamic CLI builder
 // ---------------------------------------------------------------------------
 
-/// Build a clap::Command from a manifest + runtime commands.
+/// Whether the built-in command `name` belongs to this CLI's surface. Without
+/// branding every built-in does.
+fn builtin_enabled(branding: Option<&BrandingConfig>, name: &str) -> bool {
+    branding.is_none_or(|branding| branding.allows_builtin(name))
+}
+
+/// Build a clap::Command from a manifest + runtime commands. `branding` is set
+/// for a CLI published under its own name: it supplies the help header and
+/// version, and selects which built-in commands exist at all.
 pub fn build_dynamic_cli(
     invoked_as: &str,
     manifest: &CommandManifest,
     server_display: &str,
+    branding: Option<&BrandingConfig>,
 ) -> clap::Command {
+    let display_name = manifest.server_name.as_deref().unwrap_or(server_display);
+    let about = match branding {
+        Some(branding) => {
+            let about = branding.about.as_deref().unwrap_or(display_name);
+            if branding.attribution {
+                format!("{} — powered by mcp2cli", about)
+            } else {
+                about.to_owned()
+            }
+        }
+        None => format!("{} — powered by mcp2cli", display_name),
+    };
+    let version = branding
+        .and_then(|branding| branding.version.clone())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+
     let mut app = clap::Command::new(invoked_as.to_owned())
-        .version(env!("CARGO_PKG_VERSION"))
-        .about(format!("{} — powered by mcp2cli", server_display))
+        // Usage lines must name the CLI the user typed even when a launcher set
+        // it through MCP2CLI_INVOKED_AS and argv[0] is the mcp2cli binary.
+        .bin_name(invoked_as.to_owned())
+        .version(version)
+        .about(about)
         .disable_help_subcommand(true)
         .arg_required_else_help(true)
         .subcommand_required(true)
@@ -93,15 +122,23 @@ pub fn build_dynamic_cli(
                 .help("Operation timeout in seconds (0 = no timeout)"),
         );
 
+    if let Some(after_help) = branding.and_then(|branding| branding.after_help.clone()) {
+        app = app.after_help(after_help);
+    }
+
+    // `--background` hands a job id to `jobs`; without `jobs` there is no way to
+    // collect the result, so the flag goes with it.
+    let background_jobs = builtin_enabled(branding, "jobs");
+
     // Add manifest-derived commands
     for (name, entry) in &manifest.commands {
-        if RUNTIME_COMMANDS.contains(&name.as_str()) {
+        if RUNTIME_COMMANDS.contains(&name.as_str()) && builtin_enabled(branding, name) {
             // Skip — runtime commands take precedence and are added below
             continue;
         }
         match entry {
             ManifestEntry::Command(cmd) => {
-                app = app.subcommand(build_leaf_command(name, cmd));
+                app = app.subcommand(build_leaf_command(name, cmd, background_jobs));
             }
             ManifestEntry::Group { summary, children } => {
                 let mut group = clap::Command::new(name.clone())
@@ -109,7 +146,11 @@ pub fn build_dynamic_cli(
                     .subcommand_required(true)
                     .arg_required_else_help(true);
                 for (child_name, child_cmd) in children {
-                    group = group.subcommand(build_leaf_command(child_name, child_cmd));
+                    group = group.subcommand(build_leaf_command(
+                        child_name,
+                        child_cmd,
+                        background_jobs,
+                    ));
                 }
                 app = app.subcommand(group);
             }
@@ -117,7 +158,7 @@ pub fn build_dynamic_cli(
     }
 
     // Runtime-owned commands
-    app = app
+    let builtins = clap::Command::new("builtins")
         .subcommand(
             clap::Command::new("auth")
                 .about("Authentication management")
@@ -279,7 +320,7 @@ pub fn build_dynamic_cli(
         );
 
     // Legacy hidden aliases for backward compatibility
-    app = app
+    let legacy = clap::Command::new("legacy")
         .subcommand(
             clap::Command::new("tool")
                 .hide(true)
@@ -359,11 +400,19 @@ pub fn build_dynamic_cli(
                 ),
         );
 
+    for command in builtins.get_subcommands().chain(legacy.get_subcommands()) {
+        if builtin_enabled(branding, command.get_name()) {
+            // Drop the position it had in the holder command, so built-ins keep
+            // listing after the server's own commands.
+            app = app.subcommand(command.clone().display_order(None));
+        }
+    }
+
     app
 }
 
 /// Build a clap subcommand for a single leaf manifest command.
-fn build_leaf_command(name: &str, cmd: &ManifestCommand) -> clap::Command {
+fn build_leaf_command(name: &str, cmd: &ManifestCommand, background_jobs: bool) -> clap::Command {
     let mut sub = clap::Command::new(name.to_owned()).about(cmd.summary.clone());
 
     // Schema-required fields are deliberately not clap-required: they may also
@@ -423,7 +472,7 @@ fn build_leaf_command(name: &str, cmd: &ManifestCommand) -> clap::Command {
         );
 
     // Add --background for tools
-    if cmd.supports_background {
+    if cmd.supports_background && background_jobs {
         sub = sub.arg(
             Arg::new("background")
                 .long("background")
@@ -568,8 +617,9 @@ pub fn parse_dynamic(
     invoked_as: &str,
     manifest: &CommandManifest,
     server_display: &str,
+    branding: Option<&BrandingConfig>,
 ) -> Result<DynamicParseResult> {
-    let mut app = build_dynamic_cli(invoked_as, manifest, server_display);
+    let mut app = build_dynamic_cli(invoked_as, manifest, server_display, branding);
     let matches = app.try_get_matches_from_mut(argv.to_vec()).map_err(|e| {
         if matches!(
             e.kind(),
@@ -615,7 +665,7 @@ pub fn parse_dynamic(
 
     let cmd = match sub_name {
         // Runtime commands
-        "auth" => {
+        "auth" if builtin_enabled(branding, "auth") => {
             let (auth_sub, _) = sub_matches
                 .subcommand()
                 .ok_or_else(|| anyhow!("auth requires a subcommand"))?;
@@ -626,7 +676,7 @@ pub fn parse_dynamic(
                 other => return Err(anyhow!("unknown auth subcommand: {}", other)),
             }
         }
-        "jobs" => {
+        "jobs" if builtin_enabled(branding, "jobs") => {
             let (jobs_sub, jobs_matches) = sub_matches
                 .subcommand()
                 .ok_or_else(|| anyhow!("jobs requires a subcommand"))?;
@@ -652,17 +702,17 @@ pub fn parse_dynamic(
                 other => return Err(anyhow!("unknown jobs subcommand: {}", other)),
             }
         }
-        "doctor" => DynamicCommand::Doctor,
-        "inspect" => DynamicCommand::Inspect,
-        "ping" => DynamicCommand::Ping,
-        "log" => {
+        "doctor" if builtin_enabled(branding, "doctor") => DynamicCommand::Doctor,
+        "inspect" if builtin_enabled(branding, "inspect") => DynamicCommand::Inspect,
+        "ping" if builtin_enabled(branding, "ping") => DynamicCommand::Ping,
+        "log" if builtin_enabled(branding, "log") => {
             let level = sub_matches
                 .get_one::<String>("level")
                 .ok_or_else(|| anyhow!("log requires a level"))?
                 .clone();
             DynamicCommand::Log { level }
         }
-        "complete" => {
+        "complete" if builtin_enabled(branding, "complete") => {
             let ref_kind = sub_matches
                 .get_one::<String>("ref_kind")
                 .ok_or_else(|| anyhow!("complete requires ref_kind"))?
@@ -686,20 +736,20 @@ pub fn parse_dynamic(
                 value,
             }
         }
-        "ls" => DynamicCommand::Ls {
+        "ls" if builtin_enabled(branding, "ls") => DynamicCommand::Ls {
             tools: sub_matches.get_flag("tools"),
             resources: sub_matches.get_flag("resources"),
             prompts: sub_matches.get_flag("prompts"),
             filter: sub_matches.get_one::<String>("filter").cloned(),
         },
-        "subscribe" => {
+        "subscribe" if builtin_enabled(branding, "subscribe") => {
             let uri = sub_matches
                 .get_one::<String>("uri")
                 .ok_or_else(|| anyhow!("subscribe requires a URI"))?
                 .clone();
             DynamicCommand::Subscribe { uri }
         }
-        "unsubscribe" => {
+        "unsubscribe" if builtin_enabled(branding, "unsubscribe") => {
             let uri = sub_matches
                 .get_one::<String>("uri")
                 .ok_or_else(|| anyhow!("unsubscribe requires a URI"))?
@@ -708,7 +758,7 @@ pub fn parse_dynamic(
         }
 
         // Legacy hidden aliases — pass through to old bridge
-        "tool" | "resource" | "prompt" => {
+        name @ ("tool" | "resource" | "prompt") if builtin_enabled(branding, name) => {
             return Ok(DynamicParseResult {
                 command: DynamicCommand::LegacyBridge,
                 output_format,
@@ -2114,7 +2164,7 @@ mod tests {
     #[test]
     fn builds_dynamic_cli_with_commands() {
         let manifest = test_manifest();
-        let app = build_dynamic_cli("work", &manifest, "Test Server");
+        let app = build_dynamic_cli("work", &manifest, "Test Server", None);
         // Should parse echo --message hello
         let matches = app
             .try_get_matches_from(vec!["work", "echo", "--message", "hello"])
@@ -2130,7 +2180,7 @@ mod tests {
     #[test]
     fn dynamic_cli_includes_runtime_commands() {
         let manifest = test_manifest();
-        let app = build_dynamic_cli("work", &manifest, "Test Server");
+        let app = build_dynamic_cli("work", &manifest, "Test Server", None);
         // Should parse auth login
         let matches = app
             .try_get_matches_from(vec!["work", "auth", "login"])
@@ -2142,7 +2192,7 @@ mod tests {
     #[test]
     fn parses_resource_get() {
         let manifest = test_manifest();
-        let app = build_dynamic_cli("work", &manifest, "Test Server");
+        let app = build_dynamic_cli("work", &manifest, "Test Server", None);
         let matches = app
             .try_get_matches_from(vec!["work", "get", "demo://resource/readme.md"])
             .expect("should parse");
@@ -2170,6 +2220,7 @@ mod tests {
             "email",
             &manifest,
             "Test Server",
+            None,
         ) {
             Ok(_) => panic!("--help should surface as an error signal"),
             Err(err) => err,
@@ -2194,6 +2245,7 @@ mod tests {
             "email",
             &manifest,
             "Test Server",
+            None,
         )
         .expect("jobs list should parse");
         assert!(matches!(result.command, DynamicCommand::JobsList));
@@ -2204,7 +2256,7 @@ mod tests {
     }
 
     fn parse_manifest_arguments(manifest: &CommandManifest, args: &[&str]) -> Value {
-        match parse_dynamic(&argv(args), "email", manifest, "Test Server") {
+        match parse_dynamic(&argv(args), "email", manifest, "Test Server", None) {
             Ok(DynamicParseResult {
                 command: DynamicCommand::Manifest { arguments, .. },
                 ..
@@ -2251,7 +2303,7 @@ mod tests {
             ),
             (&["email", "get"][..], "<uri>"),
         ] {
-            let err = match parse_dynamic(&argv(args), "email", &manifest, "Test Server") {
+            let err = match parse_dynamic(&argv(args), "email", &manifest, "Test Server", None) {
                 Ok(_) => panic!("{:?} should fail without its required argument", args),
                 Err(err) => err,
             };
@@ -2281,7 +2333,7 @@ mod tests {
                 r#"{"uri":"demo://resource/readme.md"}"#,
             ][..],
         ] {
-            let result = match parse_dynamic(&argv(args), "email", &manifest, "Test Server") {
+            let result = match parse_dynamic(&argv(args), "email", &manifest, "Test Server", None) {
                 Ok(result) => result,
                 Err(err) => panic!("{:?} should parse: {}", args, err),
             };
@@ -2346,6 +2398,124 @@ mod tests {
         assert_eq!(arguments["limit"], json!(5));
     }
 
+    fn branding(builtins: &[&str]) -> BrandingConfig {
+        BrandingConfig {
+            name: Some("acme-mail".to_owned()),
+            about: Some("Send mail from your terminal".to_owned()),
+            version: Some("1.4.0".to_owned()),
+            after_help: Some("Docs: https://example.com".to_owned()),
+            builtin_commands: Some(builtins.iter().map(|name| (*name).to_owned()).collect()),
+            attribution: false,
+        }
+    }
+
+    fn subcommand_names(app: &clap::Command) -> Vec<String> {
+        app.get_subcommands()
+            .map(|command| command.get_name().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn branded_cli_shows_only_the_publishers_identity_and_chosen_builtins() {
+        let manifest = test_manifest();
+        let branding = branding(&["auth"]);
+        let mut app = build_dynamic_cli("email", &manifest, "Test Server", Some(&branding));
+
+        // Server commands first, then exactly the built-ins that were asked for.
+        assert_eq!(subcommand_names(&app), ["echo", "get", "auth"]);
+        let help = app.render_help().to_string();
+        assert!(help.starts_with("Send mail from your terminal\n"), "{help}");
+        assert!(help.contains("Docs: https://example.com"), "{help}");
+        assert!(!help.contains("mcp2cli"), "{help}");
+        assert_eq!(app.render_version(), "email 1.4.0\n");
+
+        // `--background` returns a job id that only `jobs` can redeem.
+        let echo = app.find_subcommand("echo").expect("echo should exist");
+        assert!(echo.get_arguments().all(|arg| arg.get_id() != "background"));
+    }
+
+    #[test]
+    fn unbranded_cli_keeps_every_builtin_and_the_attribution() {
+        let manifest = test_manifest();
+        let mut app = build_dynamic_cli("email", &manifest, "Test Server", None);
+
+        let names = subcommand_names(&app);
+        for builtin in RUNTIME_COMMANDS
+            .iter()
+            .chain(&["tool", "resource", "prompt"])
+        {
+            assert!(
+                names.iter().any(|name| name == builtin),
+                "missing {builtin}"
+            );
+        }
+        assert!(
+            app.render_help()
+                .to_string()
+                .starts_with("Test Server — powered by mcp2cli\n")
+        );
+        let echo = app.find_subcommand("echo").expect("echo should exist");
+        assert!(echo.get_arguments().any(|arg| arg.get_id() == "background"));
+    }
+
+    #[test]
+    fn a_disabled_builtin_frees_its_name_for_a_server_tool() {
+        use crate::apps::manifest::*;
+        use indexmap::IndexMap;
+
+        let mut manifest = test_manifest();
+        manifest.commands.insert(
+            "ls".to_owned(),
+            ManifestEntry::Command(ManifestCommand {
+                kind: CommandKind::Tool,
+                origin_name: "ls".to_owned(),
+                summary: "List mailboxes".to_owned(),
+                flags: IndexMap::new(),
+                positional: None,
+                supports_background: false,
+            }),
+        );
+
+        // With the built-in `ls` on the surface it shadows the tool…
+        let result = parse_dynamic(&argv(&["email", "ls"]), "email", &manifest, "Test", None)
+            .expect("ls should parse");
+        assert!(matches!(result.command, DynamicCommand::Ls { .. }));
+
+        // …and without it, `ls` is the server's tool.
+        let branding = branding(&[]);
+        let result = parse_dynamic(
+            &argv(&["email", "ls"]),
+            "email",
+            &manifest,
+            "Test",
+            Some(&branding),
+        )
+        .expect("ls should parse");
+        assert!(
+            matches!(&result.command, DynamicCommand::Manifest { cmd, .. } if cmd.origin_name == "ls"),
+            "{:?}",
+            result.command
+        );
+    }
+
+    #[test]
+    fn usage_names_the_cli_even_when_argv0_is_the_runtime_binary() {
+        // A launcher sets MCP2CLI_INVOKED_AS and leaves argv[0] as the mcp2cli
+        // binary; clap would otherwise take the usage name from argv[0].
+        let manifest = test_manifest();
+        let err = match parse_dynamic(
+            &argv(&["/opt/lib/mcp2cli", "echo"]),
+            "email",
+            &manifest,
+            "Test Server",
+            None,
+        ) {
+            Ok(_) => panic!("echo without --message should fail"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("Usage: email echo "), "{err}");
+    }
+
     #[test]
     fn materialize_replaces_params() {
         let result = materialize_uri_template(
@@ -2401,7 +2571,7 @@ mod tests {
             server_name: Some("Test Server".to_owned()),
         };
 
-        let app = build_dynamic_cli("work", &manifest, "Test Server");
+        let app = build_dynamic_cli("work", &manifest, "Test Server", None);
         let matches = app
             .try_get_matches_from(vec![
                 "work",

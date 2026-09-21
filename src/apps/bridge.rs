@@ -483,7 +483,150 @@ fn static_bridge_defines_command(argv: &[OsString], invoked_as: &str) -> bool {
     }
 }
 
+// Built-ins that exist only on the dynamic surface.
+const DYNAMIC_ONLY_COMMANDS: &[&str] =
+    &["ls", "ping", "log", "complete", "subscribe", "unsubscribe"];
+
+/// What can be read from `argv` before the command list is known.
+struct ArgvProbe {
+    /// The top-level command, if one was named.
+    command: Option<String>,
+    /// `--timeout`, when given and valid.
+    timeout: Option<u64>,
+}
+
+/// Read the top-level command and the global `--timeout` out of `argv` without
+/// knowing which commands exist — the command list may depend on the answer.
+fn probe_argv(argv: &[OsString]) -> ArgvProbe {
+    let mut probe = clap::Command::new("probe")
+        .ignore_errors(true)
+        .disable_help_flag(true)
+        .disable_version_flag(true)
+        .allow_external_subcommands(true);
+    for flag in ["json", "non-interactive"] {
+        probe = probe.arg(
+            clap::Arg::new(flag)
+                .long(flag)
+                .global(true)
+                .action(clap::ArgAction::SetTrue),
+        );
+    }
+    for option in ["config", "output", "input-json", "timeout"] {
+        probe = probe.arg(clap::Arg::new(option).long(option).global(true));
+    }
+    let Ok(matches) = probe.try_get_matches_from(argv.to_vec()) else {
+        return ArgvProbe {
+            command: None,
+            timeout: None,
+        };
+    };
+
+    // An external subcommand keeps its arguments unparsed, so a `--timeout`
+    // written after the command is found there rather than in `matches`.
+    let mut timeout = matches.get_one::<String>("timeout").cloned();
+    if timeout.is_none()
+        && let Some((_, sub_matches)) = matches.subcommand()
+        && let Some(rest) = sub_matches.get_many::<OsString>("")
+    {
+        let rest: Vec<&OsString> = rest.collect();
+        timeout = rest.iter().enumerate().find_map(|(index, token)| {
+            let token = token.to_str()?;
+            match token.strip_prefix("--timeout=") {
+                Some(value) => Some(value.to_owned()),
+                None if token == "--timeout" => {
+                    rest.get(index + 1)?.to_str().map(ToOwned::to_owned)
+                }
+                None => None,
+            }
+        });
+    }
+
+    ArgvProbe {
+        command: matches.subcommand_name().map(ToOwned::to_owned),
+        timeout: timeout.and_then(|value| value.parse().ok()),
+    }
+}
+
+/// Whether a branded CLI lets `requested` reach the static bridge. A CLI that
+/// lists its built-ins exposes exactly those; mcp2cli's legacy aliases
+/// (`invoke`, `read`, `list`, `discover`) are not part of any such list.
+fn static_command_allowed(
+    branding: Option<&crate::config::BrandingConfig>,
+    requested: Option<&str>,
+) -> bool {
+    match (branding, requested) {
+        (Some(branding), Some(requested)) if branding.builtin_commands.is_some() => {
+            crate::config::BUILTIN_COMMANDS.contains(&requested)
+                && branding.allows_builtin(requested)
+        }
+        // No command means the top-level help, and a branded CLI has exactly
+        // one of those — the static bridge's is mcp2cli's.
+        (Some(_), None) => false,
+        _ => true,
+    }
+}
+
+/// Note under a help screen that the server's commands are missing from it.
+fn append_commands_unavailable(
+    report: &mut ExecutionReport,
+    context: &AppContext,
+    error: &anyhow::Error,
+) {
+    report.output.lines.push(String::new());
+    report.output.lines.extend(
+        commands_unavailable_message(context, error)
+            .lines()
+            .map(ToOwned::to_owned),
+    );
+}
+
+/// Explains that the command list could not be loaded, which is a different
+/// problem from the user mistyping a command.
+fn commands_unavailable_message(context: &AppContext, error: &anyhow::Error) -> String {
+    let mut message = format!(
+        "could not load the command list from {}: {:#}",
+        context.config.server.display_name, error
+    );
+    let auth_available = context
+        .config
+        .branding
+        .as_ref()
+        .is_none_or(|branding| branding.allows_builtin("auth"));
+    if auth_available {
+        message.push_str(&format!(
+            "\n\nIf the server requires authentication, run `{} auth login` first.",
+            context.invoked_as
+        ));
+    }
+    message
+}
+
 fn version_report(output_format: OutputFormat, context: &AppContext) -> ExecutionReport {
+    // A published CLI reports its own version, and nothing about the runtime
+    // underneath unless asked for JSON.
+    if let Some(branding) = &context.config.branding {
+        let version = branding
+            .version
+            .as_deref()
+            .unwrap_or(env!("CARGO_PKG_VERSION"));
+        let line = format!("{} {}", context.invoked_as, version);
+        return ExecutionReport {
+            output_format,
+            output: CommandOutput::new(
+                &context.config_name,
+                "version",
+                line.clone(),
+                vec![line],
+                json!({
+                    "version": version,
+                    "invoked_as": context.invoked_as,
+                    "runtime": "mcp2cli",
+                    "runtime_version": env!("CARGO_PKG_VERSION"),
+                }),
+            ),
+        };
+    }
+
     ExecutionReport {
         output_format,
         output: CommandOutput::new(
@@ -586,14 +729,33 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
         return Ok(version_report(output_format, &context));
     }
 
-    // Try dynamic surface first if we have cached inventory
-    if let Some(inventory) = context
-        .services
-        .state_store
-        .discovery_inventory_view(&context.config_name)
-        .await
-    {
-        let mut manifest = super::manifest::CommandManifest::from_inventory(&inventory);
+    // Work out which commands exist before parsing: from the cache, a bundled
+    // snapshot, or — on a cold start — by asking the server.
+    let probe = probe_argv(argv);
+    let requested = probe.command;
+    // `--timeout` has to bound an on-demand discovery too, and that runs before
+    // the real parser has seen the flag.
+    let mut context = context;
+    context.timeout_override = probe.timeout;
+    let branding = context.config.branding.as_ref();
+    let resolution = super::inventory::resolve(&context, requested.as_deref()).await;
+    let commands_known = resolution.has_tools();
+    let super::inventory::InventoryResolution {
+        inventory,
+        discovery_error,
+    } = resolution;
+
+    // The dynamic surface needs an inventory, with two exceptions that run on an
+    // empty manifest instead: a branded CLI, which must never show mcp2cli's
+    // generic surface, and the built-ins only the dynamic parser defines.
+    let dynamic_only = requested
+        .as_deref()
+        .is_some_and(|name| DYNAMIC_ONLY_COMMANDS.contains(&name));
+    if inventory.is_some() || branding.is_some() || dynamic_only {
+        let mut manifest = inventory
+            .as_ref()
+            .map(super::manifest::CommandManifest::from_inventory)
+            .unwrap_or_default();
         let server_display = context.config.server.display_name.as_str();
 
         // Apply profile overlay if configured
@@ -601,7 +763,13 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
             manifest.apply_profile(profile);
         }
 
-        match super::dynamic::parse_dynamic(argv, &context.invoked_as, &manifest, server_display) {
+        match super::dynamic::parse_dynamic(
+            argv,
+            &context.invoked_as,
+            &manifest,
+            server_display,
+            branding,
+        ) {
             Ok(super::dynamic::DynamicParseResult {
                 command: super::dynamic::DynamicCommand::LegacyBridge,
                 ..
@@ -644,7 +812,11 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
                                 | ErrorKind::DisplayVersion
                         ) =>
                     {
-                        return Ok(help_report(output_format, &context, clap_error));
+                        let mut report = help_report(output_format, &context, clap_error);
+                        if let Some(error) = &discovery_error {
+                            append_commands_unavailable(&mut report, &context, error);
+                        }
+                        return Ok(report);
                     }
                     Ok(clap_error) => anyhow::Error::from(clap_error),
                     Err(err) => err,
@@ -654,8 +826,17 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
                 // `invoke`, `jobs`, …) and may accept what the dynamic surface
                 // rejected. A mapped tool with a missing argument must not come
                 // back as "unrecognized subcommand".
-                if !static_bridge_defines_command(argv, &context.invoked_as) {
-                    return Err(err);
+                if !static_bridge_defines_command(argv, &context.invoked_as)
+                    || !static_command_allowed(branding, requested.as_deref())
+                {
+                    // Without the server's commands, "unrecognized subcommand"
+                    // would blame the user for what is a connectivity problem.
+                    return Err(match discovery_error {
+                        Some(error) if !commands_known => {
+                            anyhow!(commands_unavailable_message(&context, &error))
+                        }
+                        _ => err,
+                    });
                 }
             }
         }
@@ -670,9 +851,20 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
                 ErrorKind::DisplayHelp | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
             ) =>
         {
-            return Ok(help_report(output_format, &context, error));
+            let mut report = help_report(output_format, &context, error);
+            if let Some(error) = &discovery_error {
+                append_commands_unavailable(&mut report, &context, error);
+            }
+            return Ok(report);
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => {
+            return Err(match discovery_error {
+                Some(cause) if error.kind() == ErrorKind::InvalidSubcommand => {
+                    anyhow!(commands_unavailable_message(&context, &cause))
+                }
+                _ => error.into(),
+            });
+        }
     };
     let output_format = cli.effective_output(context.config.defaults.output);
     let mut context = context;
@@ -681,7 +873,32 @@ pub async fn execute(argv: &[OsString], context: AppContext) -> Result<Execution
     }
     apply_ci_flags(&mut context, cli.non_interactive, cli.input_json.as_deref())?;
     let domain_command = map_command(&cli.command)?;
+    // A job id is only worth something to a CLI that has `jobs` to redeem it.
+    if let BridgeDomainCommand::Invoke {
+        background: true, ..
+    } = &domain_command
+        && context
+            .config
+            .branding
+            .as_ref()
+            .is_some_and(|branding| !branding.allows_builtin("jobs"))
+    {
+        return Err(anyhow!(
+            "--background is not available: this CLI has no `jobs` command to collect the result"
+        ));
+    }
     execute_domain_command(domain_command, output_format, context).await
+}
+
+/// The name shown on the authorization server's consent screen.
+fn oauth_client_name(context: &AppContext) -> String {
+    match &context.config.branding {
+        Some(branding) => branding
+            .name
+            .clone()
+            .unwrap_or_else(|| context.invoked_as.clone()),
+        None => format!("mcp2cli {}", context.config_name),
+    }
 }
 
 /// Thread the CI-mode flags (`--non-interactive`, `--input-json`) onto the
@@ -1542,7 +1759,7 @@ async fn auth_login(context: &AppContext) -> Result<CommandOutput> {
                     .unwrap_or(context.config.defaults.timeout_seconds)
                     .max(1),
             ),
-            client_name: format!("mcp2cli {}", context.config_name),
+            client_name: oauth_client_name(context),
         })?;
         let mut lines = vec![
             "status: authenticated".to_owned(),
@@ -2943,6 +3160,78 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn finds_the_requested_command_without_knowing_the_command_list() {
+        let probe = |args: &[&str]| {
+            let argv = args.iter().map(OsString::from).collect::<Vec<_>>();
+            probe_argv(&argv)
+        };
+        let requested = |args: &[&str]| probe(args).command;
+
+        assert_eq!(
+            requested(&["email", "send", "--to", "a@b.c"]).as_deref(),
+            Some("send")
+        );
+        // Global options and their values are not the command.
+        assert_eq!(
+            requested(&[
+                "email",
+                "--output",
+                "json",
+                "--timeout",
+                "5",
+                "auth",
+                "login"
+            ])
+            .as_deref(),
+            Some("auth")
+        );
+        assert_eq!(requested(&["email", "--json", "ls"]).as_deref(), Some("ls"));
+        assert_eq!(requested(&["email", "--help"]), None);
+        assert_eq!(requested(&["email"]), None);
+
+        // `--timeout` bounds the on-demand discovery, wherever it was written.
+        assert_eq!(
+            probe(&["email", "--timeout", "3", "--help"]).timeout,
+            Some(3)
+        );
+        assert_eq!(
+            probe(&["email", "send", "--timeout=7", "--to", "x"]).timeout,
+            Some(7)
+        );
+        assert_eq!(
+            probe(&["email", "send", "--to", "x", "--timeout", "9"]).timeout,
+            Some(9)
+        );
+        assert_eq!(probe(&["email", "send"]).timeout, None);
+        assert_eq!(probe(&["email", "--timeout", "soon", "send"]).timeout, None);
+    }
+
+    #[test]
+    fn a_cli_that_lists_its_builtins_reaches_the_static_bridge_only_for_those() {
+        let branding = crate::config::BrandingConfig {
+            builtin_commands: Some(vec!["auth".to_owned(), "tool".to_owned()]),
+            ..crate::config::BrandingConfig::default()
+        };
+
+        assert!(static_command_allowed(Some(&branding), Some("auth")));
+        assert!(static_command_allowed(Some(&branding), Some("tool")));
+        assert!(!static_command_allowed(Some(&branding), Some("doctor")));
+        // mcp2cli's legacy aliases are never part of a published surface.
+        assert!(!static_command_allowed(Some(&branding), Some("invoke")));
+
+        // No list, or no branding at all: mcp2cli's full surface.
+        let unrestricted = crate::config::BrandingConfig::default();
+        assert!(static_command_allowed(Some(&unrestricted), Some("invoke")));
+        assert!(static_command_allowed(None, Some("doctor")));
+
+        // The top-level help of a branded CLI never comes from the static
+        // bridge — e.g. when `--config`, which only that parser knows, made the
+        // dynamic parse fail.
+        assert!(!static_command_allowed(Some(&unrestricted), None));
+        assert!(static_command_allowed(None, None));
     }
 
     #[test]

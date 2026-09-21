@@ -44,14 +44,38 @@ pub struct Invocation {
     pub invoked_as: String,
 }
 
+/// Overrides the name taken from `argv[0]`. A launcher that cannot rename the
+/// process (an npm `bin` script, a shell wrapper, Windows) sets this to make the
+/// binary behave as if it had been invoked through a symlink of that name.
+pub const INVOKED_AS_ENV: &str = "MCP2CLI_INVOKED_AS";
+
+/// Environment a launcher sets to make this process a particular CLI. It
+/// describes *this* process: a child that inherited it — a stdio MCP server or
+/// an event command that itself runs an mcp2cli alias — would wake up as the
+/// parent's CLI, bound to the parent's config. Strip it when spawning.
+pub const LAUNCHER_ENV: &[&str] = &[
+    INVOKED_AS_ENV,
+    "MCP2CLI_CONFIG",
+    "MCP2CLI_BRANDING__VERSION",
+];
+
 impl Invocation {
     pub fn capture(argv: Vec<OsString>) -> Self {
-        let invoked_as = argv
-            .first()
-            .and_then(|value| Path::new(value).file_stem())
-            .and_then(|value| value.to_str())
-            .unwrap_or("mcp2cli")
-            .to_owned();
+        let invoked_as = std::env::var(INVOKED_AS_ENV)
+            .ok()
+            .filter(|name| !name.trim().is_empty());
+        Self::capture_as(argv, invoked_as)
+    }
+
+    /// [`Self::capture`] with the `MCP2CLI_INVOKED_AS` override passed in.
+    pub fn capture_as(argv: Vec<OsString>, invoked_as: Option<String>) -> Self {
+        let invoked_as = invoked_as.unwrap_or_else(|| {
+            argv.first()
+                .and_then(|value| Path::new(value).file_stem())
+                .and_then(|value| value.to_str())
+                .unwrap_or("mcp2cli")
+                .to_owned()
+        });
         Self { argv, invoked_as }
     }
 }
@@ -118,13 +142,21 @@ pub enum AdHocTransport {
 pub const HOST_BINARY_NAME: &str = "mcp2cli";
 
 pub fn is_host_command(value: &str) -> bool {
-    matches!(value, "config" | "link" | "use" | "daemon")
+    matches!(
+        value,
+        "config" | "link" | "use" | "daemon" | "man" | "package"
+    )
 }
 
 /// Resolve an invocation into a dispatch target based on the binary name, argv tokens, and flag layout.
 pub fn resolve_invocation(invocation: &Invocation) -> DispatchTarget {
-    // Check for ad-hoc flags first (--url or --stdio)
-    if let Some(adhoc) = extract_adhoc_transport(&invocation.argv) {
+    // Check for ad-hoc flags first (--url or --stdio). They belong to mcp2cli
+    // itself: an alias or a published CLI is bound to one server, and treating
+    // its `--url` as ours would both hijack a tool's own `--url` flag and let
+    // argv swap a branded CLI for the generic surface.
+    if invocation.invoked_as == HOST_BINARY_NAME
+        && let Some(adhoc) = extract_adhoc_transport(&invocation.argv)
+    {
         let forwarded_argv = strip_adhoc_flags(&invocation.argv);
         return DispatchTarget::AdHoc {
             invoked_as: invocation.invoked_as.clone(),
@@ -300,6 +332,69 @@ fn strip_adhoc_flags(argv: &[OsString]) -> Vec<OsString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invoked_as_override_makes_the_host_binary_act_as_an_alias() {
+        // A launcher that cannot rename the process keeps argv[0] as the
+        // mcp2cli binary and names the CLI through MCP2CLI_INVOKED_AS.
+        let invocation = Invocation::capture_as(
+            vec![
+                OsString::from("/opt/lib/node_modules/mcp2cli/bin/mcp2cli"),
+                OsString::from("send"),
+            ],
+            Some("email".to_owned()),
+        );
+
+        assert_eq!(invocation.invoked_as, "email");
+        assert!(matches!(
+            resolve_invocation(&invocation),
+            DispatchTarget::AppConfig { config_name, invoked_as, .. }
+                if config_name == "email" && invoked_as == "email"
+        ));
+    }
+
+    #[test]
+    fn adhoc_flags_belong_to_the_host_binary_only() {
+        let argv = |name: &str| {
+            vec![
+                OsString::from(name),
+                OsString::from("fetch"),
+                OsString::from("--url"),
+                OsString::from("https://example.com/page"),
+            ]
+        };
+
+        assert!(matches!(
+            resolve_invocation(&Invocation::capture_as(argv("mcp2cli"), None)),
+            DispatchTarget::AdHoc { .. }
+        ));
+        // For an alias or a published CLI, `--url` is the tool's own flag.
+        match resolve_invocation(&Invocation::capture_as(argv("email"), None)) {
+            DispatchTarget::AppConfig {
+                config_name,
+                forwarded_argv,
+                ..
+            } => {
+                assert_eq!(config_name, "email");
+                assert!(forwarded_argv.contains(&OsString::from("--url")));
+            }
+            other => panic!("expected the bound config, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn man_and_package_are_host_commands() {
+        for command in ["man", "package"] {
+            let invocation = Invocation::capture_as(
+                vec![OsString::from("mcp2cli"), OsString::from(command)],
+                None,
+            );
+            assert!(
+                matches!(resolve_invocation(&invocation), DispatchTarget::Host { .. }),
+                "{command} should reach the host CLI"
+            );
+        }
+    }
 
     #[test]
     fn resolves_link_name_to_named_config() {

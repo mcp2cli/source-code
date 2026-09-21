@@ -13,6 +13,8 @@
 //!   negotiated capability snapshots, auth session records, job records
 //!   for background operations. Backed by JSON files under the project
 //!   data dir.
+//! - [`snapshot`] — portable inventory snapshots that a published CLI
+//!   ships so its commands exist before any discovery has run.
 //! - [`events`] — the in-process event bus. [`RuntimeEvent`] carries
 //!   progress, logs, list-changes, resource-updated, info messages, and
 //!   tool display for sampling. [`EventBroker`] fans out to one or more
@@ -28,12 +30,14 @@ pub mod daemon;
 mod events;
 mod host;
 mod sinks;
+mod snapshot;
 mod state;
 mod token_store;
 
 pub use events::{EventBroker, EventSink, MemoryEventSink, RuntimeEvent, StderrEventSink};
 pub use host::{RuntimeHost, RuntimeServices};
 pub use sinks::{CommandExecSink, HttpWebhookSink, SseServerSink, UnixSocketSink};
+pub use snapshot::{InventorySnapshot, SNAPSHOT_SCHEMA_VERSION};
 pub use state::{
     AuthSessionRecord, AuthSessionState, DiscoveryInventoryView, JobRecord, JobStatus,
     NegotiatedCapabilityView, StateStore,

@@ -145,3 +145,59 @@ fn parse_output_format(value: &str) -> Option<OutputFormat> {
         _ => None,
     }
 }
+
+/// Render a failed command for stderr, in the `error: …` shape clap uses for its
+/// own diagnostics — so parse errors and runtime errors read the same, and the
+/// message carries no trace of how the error was represented internally.
+pub fn render_error(error: &anyhow::Error) -> String {
+    if let Some(clap_error) = error.downcast_ref::<clap::Error>() {
+        return clap_error.render().to_string().trim_end().to_owned();
+    }
+
+    let message = error.to_string();
+    // Parse errors that were extended with suggestions are already formatted.
+    let mut rendered = if message.starts_with("error:") {
+        message
+    } else {
+        format!("error: {}", message)
+    };
+    for cause in error.chain().skip(1) {
+        rendered.push_str(&format!("\n  caused by: {}", cause));
+    }
+    rendered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::{Context, anyhow};
+
+    #[test]
+    fn renders_runtime_errors_with_their_causes() {
+        let error = Err::<(), _>(anyhow!("connection refused"))
+            .context("could not reach the server")
+            .unwrap_err();
+        assert_eq!(
+            render_error(&error),
+            "error: could not reach the server\n  caused by: connection refused"
+        );
+    }
+
+    #[test]
+    fn does_not_prefix_a_parse_error_twice() {
+        let clap_error = clap::Command::new("email")
+            .subcommand(clap::Command::new("send"))
+            .try_get_matches_from(["email", "sned"])
+            .unwrap_err();
+        let rendered = render_error(&clap_error.into());
+        assert!(
+            rendered.starts_with("error: unrecognized subcommand 'sned'"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("Error:"), "{rendered}");
+
+        // Parse errors extended with suggestions are plain strings by then.
+        let extended = anyhow!("error: unrecognized subcommand 'sned'\n\nDid you mean: send?");
+        assert!(render_error(&extended).starts_with("error: unrecognized"));
+    }
+}

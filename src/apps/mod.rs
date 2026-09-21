@@ -15,6 +15,8 @@
 //!   `clap::Command` tree (one subcommand per tool, resource, or
 //!   prompt, with flags derived from JSON Schema). Dotted tool names
 //!   like `email.send` nest automatically.
+//! - [`inventory`] — decides where `dynamic` gets its command list: the
+//!   per-user cache, a bundled snapshot, or a cold-start discovery.
 //! - [`manifest`] — the model that powers `dynamic`. Transforms raw
 //!   discovery items + an optional profile overlay (rename / hide /
 //!   group / alias) into a flat list of commands with typed flag
@@ -26,6 +28,7 @@
 
 pub mod bridge;
 pub mod dynamic;
+pub mod inventory;
 pub mod manifest;
 
 use std::sync::Arc;

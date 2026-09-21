@@ -272,7 +272,11 @@ impl EventSink for CommandExecSink {
         let command = self.command_template.clone();
 
         self.runtime.spawn(async move {
-            let result = tokio::process::Command::new("sh")
+            let mut child = tokio::process::Command::new("sh");
+            for name in crate::dispatch::LAUNCHER_ENV {
+                child.env_remove(name);
+            }
+            let result = child
                 .arg("-c")
                 .arg(&command)
                 .env("MCP_EVENT_TYPE", &event_type)
