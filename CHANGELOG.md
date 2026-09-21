@@ -1,3 +1,21 @@
+## 0.1.10 (2026-09-21)
+
+### Features
+
+- **cli:** publish an MCP server as a CLI under its own name
+
+### Fixes
+
+- **auth:** stop the OAuth callback racing the browser on macOS
+
+### Docs
+
+- branded CLI reference and publishing walkthrough
+
+### ❤️ Thank You
+
+- Andrii Tsok
+
 ## 0.1.9 (2026-09-20)
 
 ### Fixes
