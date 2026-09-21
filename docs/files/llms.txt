@@ -48,6 +48,7 @@ Full install guide: [docs/files/INSTALL.md](INSTALL.md)
 - Daemon mode — warm sessions between invocations
 - Fuzzy "Did you mean?" suggestions
 - Man pages for `mcp2cli` and every alias
+- Branded CLIs — `mcp2cli package init` publishes a server as its own npm-installable CLI
 
 ## Transports
 

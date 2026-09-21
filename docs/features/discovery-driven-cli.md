@@ -107,10 +107,22 @@ email user-profile --user-id 42 --format json
 
 Discovery results are cached in `~/.local/share/mcp2cli/instances/<name>/discovery.json`. This means:
 
-1. **First run:** Live discovery from server → cache stored
+1. **First run:** Nothing is cached, so the first command discovers automatically — `email send --to …` works on a fresh config without running `ls` first. Built-ins such as `auth login` skip this, so they work even when the server cannot be asked yet.
 2. **Subsequent runs:** Instant startup from cache
 3. **Offline:** Commands still work from cache
 4. **Cache invalidation:** When the server sends `notifications/tools/list_changed` (or similar), a stale marker is written. Next `ls` triggers live re-discovery.
+
+If the very first discovery fails, the error names the actual problem rather than an unknown command:
+
+```text
+error: could not load the command list from Email Server: …
+
+If the server requires authentication, run `email auth login` first.
+```
+
+This first discovery is time-boxed (10 seconds before `--help`, 30 before a command; `--timeout` overrides), so an unreachable server delays the first run briefly instead of for the full operation timeout.
+
+The `discovery` config section controls this: `auto: false` turns on-demand discovery off, `ttl_seconds` re-discovers periodically, and `snapshot` ships a command list with a [published CLI](branded-cli.md#discovery).
 
 Force a live re-discovery:
 
@@ -122,7 +134,7 @@ email ls    # Uses cache if fresh; re-discovers if stale
 
 ## Runtime Commands
 
-These are always available alongside discovered commands — no server schema needed:
+These are always available alongside discovered commands — no server schema needed. (A [branded CLI](branded-cli.md#built-in-commands) exposes only the ones it lists.)
 
 | Command | Purpose |
 |---------|---------|

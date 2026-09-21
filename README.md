@@ -132,6 +132,7 @@ email draft create --subject "New draft"
 - **[Profile overlays](docs/features/profile-overlays.md)** — rename, hide, group, alias commands; rename flags; change resource verbs
 - **[Ad-hoc connections](docs/features/ad-hoc-connections.md)** — `--url` and `--stdio` for config-free, zero-setup usage
 - **[Fuzzy matching](docs/features/fuzzy-matching.md)** — "Did you mean?" suggestions for mistyped commands
+- **[Branded CLI](docs/features/branded-cli.md)** — publish a server as a CLI under its own name (`npx @acme/email-cli`), with clean `--help`, login, and no trace of mcp2cli
 
 ### Transports
 
@@ -428,6 +429,7 @@ mcp2cli --url http://localhost:3001/mcp doctor
 | Output formats | [docs/features/output-formats.md](docs/features/output-formats.md) |
 | Elicitation & sampling | [docs/features/elicitation-and-sampling.md](docs/features/elicitation-and-sampling.md) |
 | Named configs & aliases | [docs/features/named-configs-and-aliases.md](docs/features/named-configs-and-aliases.md) |
+| Branded CLI | [docs/features/branded-cli.md](docs/features/branded-cli.md) |
 
 ### Articles
 
@@ -441,6 +443,7 @@ mcp2cli --url http://localhost:3001/mcp doctor
 | [Multi-Server Workflows](docs/articles/multi-server-workflows.md) | Platform engineers |
 | [Platform Engineering](docs/articles/platform-engineering.md) | Infrastructure teams |
 | [From Zero to Production](docs/articles/from-zero-to-production.md) | Production deployment |
+| [Ship Your MCP Server as a CLI](docs/articles/ship-mcp-server-as-cli.md) | Server authors publishing a branded CLI |
 
 ### Architecture
 

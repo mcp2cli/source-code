@@ -134,7 +134,7 @@ mcp2cli link create --name email \
 | `--man-dir <PATH>` | | Man page install directory (default: `~/.local/share/man/man1`) |
 | `--no-man` | | Skip man page generation and installation |
 
-Reserved names: `mcp2cli`, `config`, `link`, `use`, `daemon`.
+Reserved names: `mcp2cli`, `config`, `link`, `use`, `daemon`, `man`, `package`.
 
 ```bash
 # Install an `email` alias bound to the active/email config
@@ -150,6 +150,48 @@ Manage background daemon processes.
 mcp2cli daemon start <CONFIG_NAME>    # Start daemon for config
 mcp2cli daemon stop <CONFIG_NAME>     # Stop running daemon
 mcp2cli daemon status [CONFIG_NAME]   # Check daemon status
+```
+
+### `man install`
+
+Install (or refresh) the `mcp2cli(1)` man page.
+
+```bash
+mcp2cli man install [--dir <PATH>]    # default: ~/.local/share/man/man1
+```
+
+### `package init`
+
+Scaffold a config as a CLI published under its own name — config, inventory snapshot and launcher. See [Branded CLI](../features/branded-cli.md).
+
+```bash
+mcp2cli package init --name email \
+  [--from <CONFIG> | --config <FILE>] [--out <DIR>] [--target npm|shell] \
+  [--package-name <NAME>] [--package-version <VERSION>] [--about <TEXT>] \
+  [--builtin <COMMAND>]... [--no-builtins] [--no-snapshot] [--force]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--name <NAME>` | ✅ | Command name of the published CLI |
+| `--from <CONFIG>` | | Named config to package (default: `--name`) |
+| `--config <FILE>` | | Package a config file instead of a named config |
+| `--out <DIR>` | | Output directory (default: `./<name>-cli`) |
+| `--target <TARGET>` | | `npm` (default) or `shell` |
+| `--package-name <NAME>` | | Published package name (default: `--name`) |
+| `--package-version <VERSION>` | | Version of the published package (default: `0.1.0`) |
+| `--about <TEXT>` | | Help header (default: `server.display_name`) |
+| `--builtin <COMMAND>` | | Built-in command to expose; repeatable (default: `auth` for HTTP servers, none for stdio) |
+| `--no-builtins` | | Expose no built-in commands |
+| `--no-snapshot` | | Do not bundle an inventory snapshot |
+| `--force` | | Write into a non-empty directory |
+
+### `package snapshot`
+
+Write the server's current inventory to a snapshot file. Discovers live, and falls back to the cached inventory when the server is unreachable.
+
+```bash
+mcp2cli package snapshot [--from <CONFIG> | --config <FILE>] [--out inventory.json]
 ```
 
 ---
@@ -393,6 +435,8 @@ email send --args-file base.json --args-json '{"subject": "Hi"}' --to final@exam
 |----------|-------------|
 | `MCP2CLI_CONFIG_DIR` | Override config directory |
 | `MCP2CLI_DATA_DIR` | Override data directory |
+| `MCP2CLI_CONFIG` | Config file to load instead of a named config |
+| `MCP2CLI_INVOKED_AS` | Command name to run as, instead of `argv[0]` — used by [launchers](../features/branded-cli.md#writing-your-own-launcher) |
 | `MCP2CLI_LOGGING__LEVEL` | Override log level |
 | `MCP2CLI_LOGGING__FORMAT` | Override log format |
 | `MCP2CLI_SERVER__ENDPOINT` | Override server endpoint |

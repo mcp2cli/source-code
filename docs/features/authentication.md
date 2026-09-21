@@ -91,6 +91,8 @@ Tokens are persisted per-config at:
 ~/.local/share/mcp2cli/instances/<name>/tokens.json
 ```
 
+A [branded CLI](branded-cli.md) keeps them in its own data directory instead — `~/.local/share/<name>/instances/<name>/tokens.json` — so it never shares credentials with a user's mcp2cli setup.
+
 The file is written with `0600` permissions (owner read/write only) and contains:
 
 ```json

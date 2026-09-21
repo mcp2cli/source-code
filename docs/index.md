@@ -98,6 +98,7 @@ Each major feature has its own deep-dive page with examples, diagrams, and best 
 | Output Formats | [features/output-formats.md](features/output-formats.md) | Human, JSON, and NDJSON output modes |
 | Elicitation & Sampling | [features/elicitation-and-sampling.md](features/elicitation-and-sampling.md) | Interactive server-initiated prompts |
 | Named Configs & Aliases | [features/named-configs-and-aliases.md](features/named-configs-and-aliases.md) | Multi-server setup with symlink aliases |
+| Branded CLI | [features/branded-cli.md](features/branded-cli.md) | Publish a server as a CLI under its own name (npm, Homebrew, containers) |
 
 ### Articles & Guides
 
@@ -113,6 +114,7 @@ In-depth walkthroughs for specific use cases and audiences.
 | [Local Development & Prototyping](articles/local-dev-prototyping.md) | Server developers iterating on MCP implementations |
 | [Platform Engineering](articles/platform-engineering.md) | Infrastructure teams automating ops through MCP |
 | [From Zero to Production](articles/from-zero-to-production.md) | End-to-end production deployment guide |
+| [Ship Your MCP Server as a CLI](articles/ship-mcp-server-as-cli.md) | Server authors who want an installable, branded CLI with login — without writing one |
 
 ---
 

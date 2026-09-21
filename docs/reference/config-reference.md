@@ -69,6 +69,19 @@ profile:                                     # Optional: customize CLI surface
   groups: {}                                 # Custom command grouping
   flags: {}                                  # Rename flags per command
   resource_verb: get                         # Verb for resource reads
+
+discovery:                                   # Optional: where the command list comes from
+  auto: true                                 # Discover on demand when nothing is cached
+  snapshot: null                             # Inventory snapshot, relative to this file
+  ttl_seconds: null                          # Re-discover when the list is older than this
+
+branding:                                    # Optional: publish as a CLI under its own name
+  name: "email"                              # Product name (data dir, OAuth client, clientInfo)
+  about: "Send mail from your terminal"      # Help header
+  version: "1.4.0"                           # What --version prints
+  after_help: null                           # Text after the top-level help
+  builtin_commands: [auth]                   # Built-ins to expose (omit = all, [] = none)
+  attribution: false                         # Append "— powered by mcp2cli" to the header
 ```
 
 ---
@@ -395,6 +408,51 @@ Verb for the resource read command.
 
 ---
 
+### `discovery`
+
+Where the dynamic CLI gets its command list. See [Branded CLI → discovery](../features/branded-cli.md#discovery) for how the three sources are reconciled.
+
+#### `discovery.auto`
+
+| Type | Default |
+|------|---------|
+| `boolean` | `true` |
+
+Discover the server's capabilities on demand when no tools are cached, so the first command ever run against a config already works. Built-in commands (`auth`, `jobs`, …) never trigger it. The discovery is time-boxed — 10 seconds on the way to `--help`, 30 on the way to a command, or `--timeout` if given — rather than subject to `defaults.timeout_seconds` per request. Set to `false` to restore the explicit workflow, where `ls` or `tool list` populates the cache.
+
+#### `discovery.snapshot`
+
+| Type | Default |
+|------|---------|
+| `string` (path) | `null` |
+
+Path to an inventory snapshot written by `mcp2cli package snapshot`, relative to the config file. It seeds the cache whenever it is newer than what is cached, which gives a published CLI instant, offline `--help` — also before login.
+
+#### `discovery.ttl_seconds`
+
+| Type | Default |
+|------|---------|
+| `integer` | `null` (never) |
+
+Before running a command, re-discover if the cached command list is older than this many seconds. If the refresh fails, the stale list is kept and nothing is reported. `--help` never triggers a refresh.
+
+---
+
+### `branding`
+
+Identity of a CLI published on top of mcp2cli. The presence of this section switches the runtime into **embedded mode**: own help header and version, only the listed built-in commands, own OAuth client name and MCP `clientInfo`, own data directory, and mcp2cli's usage telemetry off unless `telemetry.enabled: true` is set explicitly. Full description: [Branded CLI](../features/branded-cli.md).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `string` | invoked name | Product name. Names the data directory; shown on the OAuth consent screen and sent as MCP `clientInfo.name` |
+| `about` | `string` | `server.display_name` | One-line description at the top of `--help` |
+| `version` | `string` | mcp2cli's version | Printed by `--version`; sent as `clientInfo.version` |
+| `after_help` | `string` | `null` | Free text after the top-level help |
+| `builtin_commands` | `list` | all | Allowlist from `auth`, `jobs`, `doctor`, `inspect`, `ls`, `ping`, `log`, `complete`, `subscribe`, `unsubscribe`, `tool`, `resource`, `prompt`. `[]` exposes none |
+| `attribution` | `boolean` | `false` | Append ` — powered by mcp2cli` to the help header |
+
+---
+
 ## Environment Variable Overrides
 
 Any config field can be overridden via environment variable:
@@ -416,6 +474,8 @@ Additionally:
 |----------|-------------|
 | `MCP2CLI_CONFIG_DIR` | Override config directory path |
 | `MCP2CLI_DATA_DIR` | Override data directory path |
+| `MCP2CLI_CONFIG` | Path of the config file to load, instead of looking one up by name |
+| `MCP2CLI_INVOKED_AS` | Command name to run as, instead of the one in `argv[0]`. With `MCP2CLI_CONFIG`, this is how a [launcher](../features/branded-cli.md#writing-your-own-launcher) starts a published CLI without a symlink |
 
 ---
 
@@ -433,6 +493,8 @@ Additionally:
 | `active.json` | Currently active config pointer |
 
 Default base: `~/.local/share/mcp2cli/`
+
+A config with a [`branding`](#branding) section uses `~/.local/share/<branding.name>/` instead (`~/Library/Application Support/<name>/` on macOS), so a published CLI never shares state — in particular, tokens — with the user's own mcp2cli setup. With `MCP2CLI_DATA_DIR` set it uses `$MCP2CLI_DATA_DIR/apps/<branding.name>/`.
 
 ---
 

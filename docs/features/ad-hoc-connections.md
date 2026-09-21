@@ -104,6 +104,7 @@ This name appears in JSON output `app_id` and log messages.
 - **No daemon integration:** Each invocation creates a fresh connection (use named configs for daemon support)
 - **No profile overlays:** The auto-generated CLI surface is used as-is
 - **Discovery on every run:** No cache means every invocation performs live discovery
+- **`mcp2cli` only:** `--url`, `--stdio` and `--env` are recognized when the binary is invoked as `mcp2cli`. An alias (`email …`) or a [branded CLI](branded-cli.md) is bound to one server, so there these names are free for a tool's own flags (`email fetch --url …`).
 
 ---
 
