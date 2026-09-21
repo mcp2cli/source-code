@@ -322,6 +322,9 @@ fn exchange_code(
 /// (`http://127.0.0.1:{port}/callback`).
 const CALLBACK_PATH: &str = "/callback";
 
+/// How long an accepted loopback connection may take to send its request line.
+const CALLBACK_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
 fn wait_for_callback(
     listener: TcpListener,
     expected_state: &str,
@@ -334,9 +337,34 @@ fn wait_for_callback(
     let deadline = Instant::now() + timeout;
 
     loop {
+        // Checked here as well as on WouldBlock: a run of stray connections
+        // would otherwise keep the loop from ever looking at the clock.
+        if Instant::now() >= deadline {
+            return Err(anyhow!("timed out waiting for OAuth browser callback"));
+        }
         match listener.accept() {
             Ok((mut stream, _addr)) => {
-                let request_path = read_request_path(&mut stream)?;
+                // The listener is non-blocking so this loop can poll its
+                // deadline. On BSD-derived stacks (macOS) an accepted socket
+                // *inherits* that flag — on Linux it never does — and a
+                // non-blocking read fails with WouldBlock whenever the
+                // request bytes have not arrived yet, which is a race the
+                // browser usually, but not always, wins. Read blocking, with
+                // a bound so a connection that never speaks cannot stall the
+                // login either.
+                if stream.set_nonblocking(false).is_err()
+                    || stream
+                        .set_read_timeout(Some(CALLBACK_REQUEST_TIMEOUT))
+                        .is_err()
+                {
+                    continue;
+                }
+                // Anything that is not a well-formed GET is as stray as a GET
+                // for the wrong path, and gets the same treatment: it must not
+                // abort an in-flight login.
+                let Ok(request_path) = read_request_path(&mut stream) else {
+                    continue;
+                };
                 let (path, query) = request_path.split_once('?').unwrap_or((&request_path, ""));
 
                 // Ignore anything that isn't the redirect URI's own path —
@@ -737,6 +765,69 @@ mod tests {
         )
         .expect_err("an error callback must be rejected");
         assert!(error.to_string().contains("access_denied"), "{error}");
+    }
+
+    /// Regression: the callback listener is non-blocking, and on macOS an
+    /// accepted socket inherits that flag. The server then read the request
+    /// without waiting for it, got WouldBlock, and aborted the login — a race
+    /// decided by whether the browser's bytes beat the read. Sending the
+    /// request only after the server has certainly accepted makes the server
+    /// lose that race every time, on every platform that has it.
+    #[test]
+    fn callback_that_arrives_after_the_connection_is_accepted_still_completes() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = thread::spawn(move || {
+            wait_for_callback(
+                listener,
+                "expected-state",
+                "https://issuer.example",
+                Duration::from_secs(10),
+            )
+        });
+
+        let mut browser = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        // Longer than the accept loop's 100 ms poll, so the read comes first.
+        thread::sleep(Duration::from_millis(400));
+        browser
+            .write_all(
+                b"GET /callback?code=slow-code&state=expected-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            )
+            .unwrap();
+        let mut response = String::new();
+        browser.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        std::io::Read::read_to_string(&mut browser, &mut response).ok();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+
+        let callback = handle.join().unwrap().expect("login should complete");
+        assert_eq!(callback.code, "slow-code");
+    }
+
+    #[test]
+    fn a_connection_that_is_not_a_valid_request_does_not_abort_the_login() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = thread::spawn(move || {
+            wait_for_callback(
+                listener,
+                "expected-state",
+                "https://issuer.example",
+                Duration::from_secs(10),
+            )
+        });
+
+        // A port scanner's probe, or a TLS ClientHello sent to a plain port.
+        let mut probe = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        probe.write_all(b"\x16\x03\x01\x00\xa5\x01\x00").unwrap();
+        drop(probe);
+
+        let mut real = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        real.write_all(
+            b"GET /callback?code=real-code&state=expected-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        )
+        .unwrap();
+        let callback = handle.join().unwrap().expect("login should complete");
+        assert_eq!(callback.code, "real-code");
     }
 
     #[test]
